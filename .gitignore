@@ -1,0 +1,18 @@
+# Decrypted secrets — never commit
+*.env
+.env
+.env.*
+
+# Sealed Secrets material
+pub-cert.pem
+sealed-secrets-key.backup.yaml
+
+# Repo deploy keys
+homelab-deploy-key
+homelab-deploy-key.pub
+
+# Editor / OS junk
+.DS_Store
+.idea/
+.vscode/
+*.swp
