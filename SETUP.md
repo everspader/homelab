@@ -5,6 +5,28 @@
 
 Step-by-step plan to stand up a single-node k3s cluster on a GMKtec NucBox G11 as a **general-purpose home server**, with Rookia (`apps/api` + pg-boss worker, currently on Railway) as the first production tenant. Structured so additional home services (Pi-hole, Home Assistant, Vaultwarden, Uptime Kuma, etc.) can be added later by dropping a new directory under `tenants/`. Each phase is small, achievable, and independently testable. Stop after any phase — nothing breaks.
 
+## Status
+
+_Last updated: 2026-05-08._
+
+| Phase | Title | Status |
+| ----- | ----- | ------ |
+| 0     | Hardware + BIOS                              | ✅ done |
+| 1     | Install Ubuntu Server 26.04 LTS              | ✅ done |
+| 2     | Base hardening (sudo NOPASSWD, ufw, etc.)    | ✅ done |
+| 3     | Install k3s single-node                      | ✅ done |
+| 4     | GitOps repo skeleton                         | ✅ done |
+| 5     | Sealed Secrets via Helm                      | ✅ done |
+| 6     | ArgoCD via Helm + GitHub App OAuth           | ✅ done |
+| 7     | Cloudflare Tunnel + Access on argo.spaderlabs.com | ✅ done |
+| 8     | amd64 image build in CI (Rookia repo)        | ⏳ next |
+| 9     | Seal Rookia `.env` + deploy API              | ⏳ pending |
+| 10    | Deploy pg-boss worker                        | ⏳ pending |
+| 11    | Cutover from Railway                         | ⏳ pending |
+| 12    | etcd backups (local + S3 offsite)            | ⏳ pending |
+| 13    | Adding a new tenant (template; not blocking) | – reference |
+| 14    | Tailscale for LAN-only services              | partial (host-side only) |
+
 ## Assumptions
 
 - GMKtec NucBox G11, 16GB / 512GB NVMe, in hand
