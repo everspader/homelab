@@ -15,7 +15,12 @@ This directory is in the repo for diff history and rebuild reproducibility, **no
 | Repo path | Symlinked from | Reload command |
 | --- | --- | --- |
 | `host/k3s/config.yaml` | `/etc/rancher/k3s/config.yaml` | `sudo systemctl restart k3s` |
+| `host/postgres/conf.d/00-homelab.conf` | `/etc/postgresql/17/main/conf.d/00-homelab.conf` | `sudo systemctl reload postgresql@17-main` |
+| `host/postgres/pg_hba.conf` | `/etc/postgresql/17/main/pg_hba.conf` | `sudo systemctl reload postgresql@17-main` |
 
 ## Secrets
 
-`host/k3s/config.yaml` is plaintext-only. Phase 12 will add etcd S3 backup credentials (`etcd-s3-access-key`, `etcd-s3-secret-key`) — those go in `/etc/rancher/k3s/config.yaml.d/90-secrets.yaml` on the box, **not** in this repo. K3s merges every `*.yaml` in `config.yaml.d/` after `config.yaml`, so the split is supported natively. Sealed Secrets cannot be used here because k3s reads its config before the cluster (and therefore the Sealed Secrets controller) exists.
+Files in `host/` are plaintext-only — never commit secrets here.
+
+- **k3s:** Phase 12 etcd S3 credentials (`etcd-s3-access-key`, `etcd-s3-secret-key`) go in `/etc/rancher/k3s/config.yaml.d/90-secrets.yaml` on the box, **not** the repo. K3s merges every `*.yaml` in `config.yaml.d/` after `config.yaml`. Sealed Secrets can't help — k3s reads its config before the cluster (and the Sealed Secrets controller) exists.
+- **Postgres:** the `postgres` superuser password, per-app role passwords, and pgBackRest R2 credentials live in 1Password and on the box at `/etc/pgbackrest/pgbackrest.conf` (mode 0600, owned by `postgres`). Same constraint — Sealed Secrets is k8s-only, host Postgres exists outside the cluster.
