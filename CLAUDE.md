@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-GitOps repo for a single-node k3s cluster on a GMKtec NucBox G11 (Debian 12, amd64). Not application code — only Kubernetes manifests, Helm values, and ArgoCD `Application` resources. ArgoCD running in-cluster is the only thing that applies changes; `kubectl apply` by hand is reserved for the one-time bootstrap flow described in `SETUP.md`.
+GitOps repo for a single-node k3s cluster on a GMKtec NucBox G11 (Ubuntu 26.04 LTS Server, minimal install, amd64). Not application code — only Kubernetes manifests, Helm values, and ArgoCD `Application` resources. ArgoCD running in-cluster is the only thing that applies changes; `kubectl apply` by hand is reserved for the one-time bootstrap flow described in `SETUP.md`.
+
+Domains in use: `rookia.com` (Rookia tenant) and `spaderlabs.com` (personal / homelab infra — e.g. `argo.spaderlabs.com`).
 
 The full step-by-step build plan lives in [SETUP.md](SETUP.md). Treat it as the source of truth — its "Key traps" section at the bottom encodes constraints that are easy to violate accidentally.
 
@@ -19,6 +21,8 @@ platform/           Cluster-wide infra. One subdir == one ArgoCD Application.
   namespaces/       Namespace + ResourceQuota per tenant
 tenants/            One subdir per logical app. Each has app.yaml + manifests/
   rookia/           First tenant: apps/api + pg-boss worker (images on GHCR)
+host/               Host-level config NOT managed by ArgoCD — symlinked into the box's filesystem and reloaded manually. See host/README.md.
+  k3s/config.yaml   → /etc/rancher/k3s/config.yaml on the homelab box
 ```
 
 **Install order is load-bearing:** Sealed Secrets (Phase 5) → ArgoCD (Phase 6, initially accessed via `kubectl port-forward`) → Cloudflared (Phase 7, with the tunnel token already sealed). Reversing this means committing plaintext secrets or hand-rolling the tunnel. See `SETUP.md` for the full sequence.

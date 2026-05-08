@@ -1,0 +1,13 @@
+write-kubeconfig-mode: "0644"
+cluster-init: true
+node-name: homelab
+
+disable:
+  - traefik         # Cloudflare Tunnel handles public ingress (Phase 7)
+  - servicelb       # no LoadBalancer Services on a single-node box
+
+tls-san:
+  - 192.168.68.106  # eth LAN IP
+  - 192.168.68.109  # wifi fallback
+  - 100.107.122.69  # Tailscale
+  - homelab.local   # mDNS

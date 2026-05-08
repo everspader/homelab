@@ -1,18 +1,18 @@
 # Homelab on GMKtec NucBox G11 (k3s) — first tenant: Rookia
 
 > Hardware: GMKtec NucBox G11 · AMD Ryzen Embedded R2514 (4C/8T) · 16GB DDR4 · 512GB NVMe
-> Host: `homelab` (Debian 12 Bookworm)
+> Host: `homelab` (Ubuntu 26.04 LTS Server, minimal install)
 
 Step-by-step plan to stand up a single-node k3s cluster on a GMKtec NucBox G11 as a **general-purpose home server**, with Rookia (`apps/api` + pg-boss worker, currently on Railway) as the first production tenant. Structured so additional home services (Pi-hole, Home Assistant, Vaultwarden, Uptime Kuma, etc.) can be added later by dropping a new directory under `tenants/`. Each phase is small, achievable, and independently testable. Stop after any phase — nothing breaks.
 
 ## Assumptions
 
 - GMKtec NucBox G11, 16GB / 512GB NVMe, in hand
-- Wired Ethernet to the LAN
+- Wired Ethernet from the G11 to the TP-Link Deco mesh router (LAN IP `192.168.68.106`); wifi (`192.168.68.109`) available as fallback
 - Mac on same LAN
-- Cloudflare account with the `rookia.com` zone (and optionally a personal zone for non-Rookia hostnames, e.g. `home.<personal-domain>`)
-- GitHub account
-- USB stick (≥4GB) for Debian installer
+- Cloudflare account with the `rookia.com` zone (Rookia tenant) and `spaderlabs.com` zone (personal / homelab infra hostnames, e.g. `argo.spaderlabs.com`)
+- GitHub account (SSH public keys imported into the host installer for passwordless login)
+- USB stick (≥4GB) for the Ubuntu Server installer
 
 ## Out of scope (for now)
 
@@ -27,7 +27,7 @@ HA control plane, multi-node, on-cluster Postgres (Neon stays remote for Rookia)
 
 ## Build order at a glance
 
-1. **Phase 0–2** — hardware, Debian, hardening. Bare host ready.
+1. **Phase 0–2** — hardware, Ubuntu Server, hardening. Bare host ready.
 2. **Phase 3** — k3s installed, `kubectl` works from the Mac.
 3. **Phase 4** — GitOps repo skeleton in place.
 4. **Phase 5** — Sealed Secrets controller installed via Helm. `kubeseal` can encrypt anything we'll need next (Cloudflare tunnel token, ArgoCD admin password, Rookia `.env`).
@@ -41,86 +41,87 @@ HA control plane, multi-node, on-cluster Postgres (Neon stays remote for Rookia)
 
 **Goal:** NucBox powered on, BIOS configured for headless server use.
 
-- [ ] Unbox. Plug in keyboard, monitor (HDMI), Ethernet, power.
-- [ ] Power on. Spam `Del` (or `F2` / `F7` depending on BIOS) at boot to enter BIOS/setup.
-- [ ] In BIOS, set:
+- [X] Unbox. Plug in keyboard, monitor (HDMI), Ethernet, power.
+- [X] Power on. Spam `Del` (or `F2` / `F7` depending on BIOS) at boot to enter BIOS/setup.
+- [X] In BIOS, set:
   - **Virtualization (SVM Mode):** Enabled — required for any future VMs / nested containers.
   - **Power on after AC loss / Restore on AC Power Loss:** Enabled — server auto-recovers from outages.
   - **Boot order:** Internal NVMe first; USB second (for the installer).
-  - **Secure Boot:** Disabled (simplest for Debian; can re-enable later with shim).
+  - **Secure Boot:** Disabled (simplest for Ubuntu Server; can re-enable later with shim).
   - **Wake on LAN:** Optional, useful for remote power-on.
-- [ ] Save and exit.
+- [X] Save and exit.
 
 **Verify:** Boots to "no OS" / PXE prompt. Ethernet link LED solid.
 
 ---
 
-## Phase 1 — Install Debian 12 (~45 min)
+## Phase 1 — Install Ubuntu Server 26.04 LTS (~45 min)
 
-**Goal:** SSH into a freshly installed Debian 12 minimal server.
+**Goal:** SSH into a freshly installed Ubuntu Server 26.04 LTS, minimal flavour, with GitHub-imported SSH keys.
 
 ### 1.1 Build the installer USB
 
 On the Mac:
 
-- [ ] Download Debian 12 netinst ISO: https://www.debian.org/download
+- [ ] Download Ubuntu Server 26.04 LTS ISO: <https://ubuntu.com/download/server>
 - [ ] Flash it to the USB stick. Easiest: [balenaEtcher](https://etcher.balena.io). Or `dd`:
 
 ```bash
 diskutil list                                # find the USB disk identifier (e.g. /dev/disk4)
 diskutil unmountDisk /dev/diskN
-sudo dd if=~/Downloads/debian-12.x.x-amd64-netinst.iso of=/dev/rdiskN bs=4m status=progress
+sudo dd if=~/Downloads/ubuntu-26.04-live-server-amd64.iso of=/dev/rdiskN bs=4m status=progress
 diskutil eject /dev/diskN
 ```
 
-### 1.2 Install Debian
+### 1.2 Install Ubuntu
 
 - [ ] Insert the USB into the NucBox, boot. (If it doesn't boot from USB, hit the boot menu key — usually `F7` or `F11`.)
-- [ ] Pick **Install** (text mode is fine; no need for graphical).
-- [ ] Walkthrough:
-  - **Hostname:** `homelab`
-  - **Domain:** leave blank (or `lan` if you have an internal domain)
-  - **Root password:** **leave blank** to disable root login (you'll use `sudo` from the user account)
-  - **User:** `home` (or whatever — single human user)
-  - **Partitioning:** Guided → use entire disk → All files in one partition. Target the NVMe.
-  - **Software selection:** **uncheck everything except SSH server and standard system utilities.** No desktop environment.
-- [ ] Reboot. Remove USB.
+- [ ] Pick **Try or Install Ubuntu Server**.
+- [ ] Subiquity walkthrough:
+  - **Variant:** Ubuntu Server (full), then pick the **minimal** option when offered. (Avoid the "Ubuntu Server (minimised)" cut-down flavour that drops cloud-init/snapd.)
+  - **Network:** plug Ethernet (`eno1`); subiquity picks up DHCP from the Deco. Wifi (`wlp2s0`) is optional fallback.
+  - **Proxy:** leave blank.
+  - **Storage:** guided → use entire NVMe disk. Target the internal NVMe, not the USB.
+  - **Profile:** name `home`, hostname `homelab`, username `home`, strong password (used for console + sudo, never SSH).
+  - **Ubuntu Pro:** skip.
+  - **SSH:** install OpenSSH server. Choose **"Import SSH identity → from GitHub"** and enter your GitHub username — the installer pulls your public keys directly from `github.com/<user>.keys` and writes them to `~/.ssh/authorized_keys`. No `ssh-copy-id` round-trip needed.
+  - **Featured server snaps:** skip.
+- [ ] Wait for install to finish, then reboot. **Remove the USB before it reboots** — otherwise it boots back into the installer.
 
-### 1.3 Get (or create) your Mac SSH public key
+### 1.3 Find the NucBox on the LAN
 
-On the Mac:
-
-```bash
-cat ~/.ssh/id_ed25519.pub
-```
-
-If it doesn't exist:
+The Deco assigns DHCP. From the Mac:
 
 ```bash
-ssh-keygen -t ed25519 -C "your-email@example.com"
+ping homelab.local                   # mDNS (avahi); works on most LANs
+arp -a | grep -i homelab             # or grep router DHCP leases for the MAC
 ```
 
-### 1.4 Find the NucBox on the LAN
+In the Deco app, pin the lease: **Clients → homelab → Reserve IP** so the address is stable. Current assignments: eth `192.168.68.106`, wifi `192.168.68.109`.
+
+### 1.4 First SSH
+
+Keys were imported from GitHub during install, so the first connection is already passwordless:
 
 ```bash
-ping homelab.local                   # works on most networks via mDNS (avahi)
-# Or check your router's DHCP leases.
+ssh home@homelab.local               # or home@192.168.68.106
 ```
 
-In your router admin, assign a **static DHCP lease** to the NucBox's MAC.
+Convenience aliases in `~/.ssh/config`:
 
-### 1.5 First SSH + key copy
-
-From the Mac (will prompt for password the first time):
-
-```bash
-ssh-copy-id home@homelab.local
-ssh home@homelab.local                # should now be passwordless
+```sshconfig
+Host homelab
+    HostName 192.168.68.106
+    User home
+Host homelab-wlan
+    HostName 192.168.68.109
+    User home
+Host homelab-ts
+    HostName 100.107.122.69          # Tailscale (Phase 14)
+    User home
 ```
 
-Verify passwordless **before moving on** — Phase 2 disables password SSH.
-
-### 1.6 Update the system
+### 1.5 Update the system
 
 On the NucBox:
 
@@ -134,7 +135,7 @@ sudo reboot
 
 ```bash
 uname -m              # → x86_64
-cat /etc/os-release   # → Debian GNU/Linux 12 (bookworm)
+cat /etc/os-release   # → Ubuntu 26.04 LTS
 ```
 
 ---
@@ -143,39 +144,110 @@ cat /etc/os-release   # → Debian GNU/Linux 12 (bookworm)
 
 **Goal:** locked-down host before installing k3s.
 
-### 2.1 Disable SSH password auth
+### 2.1 Passwordless `sudo` for the `home` user
 
-Create `/etc/ssh/sshd_config.d/99-homelab.conf`:
+Single human user on a key-only LAN/Tailscale box — typing the password every `sudo` is friction with no security benefit. Drop a sudoers file in via `visudo`'s safe-edit path so a typo can't lock you out:
 
-```conf
+```bash
+echo 'home ALL=(ALL) NOPASSWD:ALL' \
+  | sudo EDITOR='tee' visudo -f /etc/sudoers.d/90-home-nopasswd
+sudo chmod 440 /etc/sudoers.d/90-home-nopasswd
+sudo visudo -c                          # validates the entire sudoers tree
+```
+
+**Verify:**
+
+```bash
+sudo -n true && echo OK                 # → OK, no prompt
+sudo -n visudo -c                       # → /etc/sudoers: parsed OK
+```
+
+The console (TTY) login still prompts for the `home` password — that's `getty`/PAM, not `sudo`, and it's the break-glass path if SSH ever breaks. Leave it.
+
+### 2.2 Verify SSH password auth is disabled
+
+If you imported SSH keys from GitHub during the Ubuntu install (Phase 1.2), cloud-init has already dropped `/etc/ssh/sshd_config.d/50-cloud-init.conf` with `PasswordAuthentication no` + `PermitRootLogin no` + `KbdInteractiveAuthentication no`. Verify, don't redo:
+
+```bash
+sudo sshd -T | egrep "^(passwordauthentication|permitrootlogin|kbdinteractiveauthentication|pubkeyauthentication) "
+```
+
+Expect:
+
+```
+passwordauthentication no
+permitrootlogin no
+kbdinteractiveauthentication no
+pubkeyauthentication yes
+```
+
+If any of those is still `yes` (e.g. fresh Debian install, or Ubuntu without GitHub-key import), drop an override at `/etc/ssh/sshd_config.d/99-homelab.conf`:
+
+```bash
+sudo tee /etc/ssh/sshd_config.d/99-homelab.conf >/dev/null <<'EOF'
 PasswordAuthentication no
 PermitRootLogin no
 KbdInteractiveAuthentication no
+EOF
+sudo sshd -t                      # validate before reloading
+sudo systemctl reload ssh         # reload, not restart — keeps active sessions alive
 ```
 
-Restart SSH:
+Don't edit `50-cloud-init.conf` directly; it's owned by cloud-init and may be regenerated. Higher-numbered dropins win.
 
-```bash
-sudo systemctl restart ssh
-```
+### 2.3 Install firewall, allow LAN-only access to SSH and the k3s API
 
-### 2.2 Install firewall, allow LAN-only access to SSH and the k3s API
+Order matters: **add allow rules before enabling ufw**, or you'll lock yourself out of the SSH session you're typing in.
 
 ```bash
 sudo apt install -y ufw
-sudo ufw allow from 192.168.0.0/16 to any port 22
-sudo ufw allow from 192.168.0.0/16 to any port 6443
+
+# LAN-only inbound to SSH and the k3s API server
+sudo ufw allow from 192.168.0.0/16 to any port 22   proto tcp
+sudo ufw allow from 192.168.0.0/16 to any port 6443 proto tcp
+
+# Tailscale interface — let everything in over the tailnet (zero-trust mesh, not the public internet)
+sudo ufw allow in on tailscale0
+
+# Sane defaults
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+
 sudo ufw --force enable
+sudo ufw status verbose
 ```
 
-### 2.3 Enable unattended security upgrades
+`ufw enable` warns "may disrupt existing ssh connections" — it doesn't, your current session stays up because conntrack lets established flows through. From a *new* Mac terminal verify `ssh homelab true` still works before closing the existing session.
+
+Expected `ufw status verbose` (meaningful lines):
+
+```
+Status: active
+Default: deny (incoming), allow (outgoing), disabled (routed)
+
+To                         Action      From
+--                         ------      ----
+22/tcp                     ALLOW IN    192.168.0.0/16
+6443/tcp                   ALLOW IN    192.168.0.0/16
+Anywhere on tailscale0     ALLOW IN    Anywhere
+Anywhere (v6) on tailscale0 ALLOW IN  Anywhere (v6)
+```
+
+If you previously added rules without `proto tcp` (e.g. plain `port 22`), they'll appear as separate, broader entries (`22 ALLOW IN ...`). Delete the protoless versions to avoid duplicates:
+
+```bash
+sudo ufw delete allow from 192.168.0.0/16 to any port 22
+sudo ufw delete allow from 192.168.0.0/16 to any port 6443
+```
+
+### 2.4 Enable unattended security upgrades
 
 ```bash
 sudo apt install -y unattended-upgrades
 sudo dpkg-reconfigure -plow unattended-upgrades
 ```
 
-### 2.4 Install basic tools
+### 2.5 Install basic tools
 
 ```bash
 sudo apt install -y htop vim curl git tmux ca-certificates lsb-release apache2-utils
@@ -183,14 +255,14 @@ sudo apt install -y htop vim curl git tmux ca-certificates lsb-release apache2-u
 
 (`apache2-utils` ships `htpasswd`, used in Phase 6 to bcrypt the ArgoCD admin password.)
 
-### 2.5 Confirm cgroup v2 + memory controller (Debian 12 default; just verify)
+### 2.6 Confirm cgroup v2 + memory controller (Ubuntu 26.04 default; just verify)
 
 ```bash
 mount | grep cgroup2                       # cgroup2 on /sys/fs/cgroup
 cat /sys/fs/cgroup/cgroup.controllers      # must list memory cpu io
 ```
 
-If `memory` is missing (rare on stock Debian 12), add it via systemd:
+If `memory` is missing (rare on stock Ubuntu 26.04), add it via GRUB:
 
 ```bash
 echo 'GRUB_CMDLINE_LINUX_DEFAULT="quiet systemd.unified_cgroup_hierarchy=1"' | sudo tee -a /etc/default/grub
@@ -206,45 +278,107 @@ sudo reboot
 
 **Goal:** working `kubectl get nodes` Ready, both from NucBox and Mac.
 
-### 3.1 Install k3s
+### 3.1 Clone the homelab repo on the box
 
-Traefik is disabled (Cloudflare Tunnel handles ingress). Embedded etcd is enabled (needed for Phase 12 snapshots).
+The k3s config file lives in this repo at [`host/k3s/config.yaml`](host/k3s/config.yaml) and gets symlinked into `/etc/rancher/k3s/`. So the box needs to clone the repo before k3s can start. See [`host/README.md`](host/README.md) for the broader contract — this is *source-controlled host config*, not GitOps. Pushes don't auto-apply; somebody runs `git pull && systemctl restart k3s` on the box.
 
-```bash
-curl -sfL https://get.k3s.io | sh -s - \
-  --write-kubeconfig-mode 644 \
-  --disable traefik \
-  --disable servicelb \
-  --cluster-init \
-  --node-name homelab
-```
+#### 3.1.1 Configure git identity
 
-On the NucBox, wait for the node to be Ready:
+On the homelab:
 
 ```bash
-sudo k3s kubectl get nodes
+git config --global user.email "everton.spader@gmail.com"
+git config --global user.name "Everton Spader"
 ```
 
-### 3.2 Copy kubeconfig to the Mac
+#### 3.1.2 Generate an SSH key for GitHub access
+
+A dedicated ed25519 key for this box, used as a **read-only Deploy Key** on the homelab repo. Don't reuse your personal GitHub key — the deploy-key pattern scopes access to one repo and is easy to revoke.
+
+```bash
+ssh-keygen -t ed25519 -C "home@homelab" -f ~/.ssh/id_ed25519_homelab -N ""
+cat ~/.ssh/id_ed25519_homelab.pub
+```
+
+Then on GitHub: **everspader/homelab → Settings → Deploy keys → Add deploy key**. Title: `homelab box (read)`. Paste the public key. **Do not** check "Allow write access" — pulling is enough; pushes happen from your Mac.
+
+Tell SSH to use this key for `github.com`:
+
+```bash
+mkdir -p ~/.ssh && chmod 700 ~/.ssh
+cat >> ~/.ssh/config <<'EOF'
+
+Host github.com
+  HostName github.com
+  User git
+  IdentityFile ~/.ssh/id_ed25519_homelab
+  IdentitiesOnly yes
+EOF
+chmod 600 ~/.ssh/config
+
+# Pre-trust github.com host key so the first clone doesn't prompt
+ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+# Verify
+ssh -T git@github.com   # → "Hi everspader/homelab! You've successfully authenticated..."
+```
+
+#### 3.1.3 Clone the repo
+
+```bash
+git clone git@github.com:everspader/homelab.git ~/homelab
+ls ~/homelab/host/k3s/config.yaml   # confirms host/ tree pulled in
+```
+
+### 3.2 Symlink the k3s config
+
+```bash
+sudo mkdir -p /etc/rancher/k3s
+sudo ln -sf /home/home/homelab/host/k3s/config.yaml /etc/rancher/k3s/config.yaml
+ls -l /etc/rancher/k3s/config.yaml   # verify the symlink target
+sudo cat /etc/rancher/k3s/config.yaml
+```
+
+Why each line in `host/k3s/config.yaml`:
+
+- `write-kubeconfig-mode: "0644"` — kubeconfig readable without sudo (so `scp` to the Mac works as `home`).
+- `cluster-init: true` — embeds etcd instead of the default SQLite kine. Required for the Phase 12 snapshot mechanism and for adding nodes later.
+- `disable: [traefik, servicelb]` — Cloudflare Tunnel handles public ingress; no `LoadBalancer` Services on a single-node box.
+- `tls-san:` — extra Subject Alternative Names baked into the API server cert. Without these, `kubectl` from anything other than the node's primary IP fails TLS verification. Adding all addresses you might ever connect from (LAN eth/wifi, Tailscale, mDNS) avoids cert regeneration later.
+
+### 3.3 Install k3s
+
+```bash
+curl -sfL https://get.k3s.io | sh -
+```
+
+The install script picks up `/etc/rancher/k3s/config.yaml` automatically — no flags needed. Wait for the node to be Ready:
+
+```bash
+sudo k3s kubectl get nodes                       # → STATUS Ready
+sudo k3s kubectl get pods -A                     # coredns + metrics-server + local-path-provisioner Running
+```
+
+### 3.4 Copy kubeconfig to the Mac
 
 On the Mac:
 
 ```bash
-scp home@homelab:/etc/rancher/k3s/k3s.yaml ~/.kube/homelab.yaml
-sed -i '' 's/127.0.0.1/<HOMELAB_LAN_IP>/' ~/.kube/homelab.yaml
+scp homelab:/etc/rancher/k3s/k3s.yaml ~/.kube/homelab.yaml
+sed -i '' 's/127.0.0.1/192.168.68.106/' ~/.kube/homelab.yaml
 export KUBECONFIG=~/.kube/homelab.yaml
 kubectl get nodes
 ```
 
 Persist `KUBECONFIG` in `~/.zshrc` (or merge into `~/.kube/config` with `KUBECONFIG=~/.kube/config:~/.kube/homelab.yaml kubectl config view --flatten > ~/.kube/merged && mv ~/.kube/merged ~/.kube/config`).
 
-### 3.3 Install `helm` + `kubeseal` on the Mac
+### 3.5 Install `helm` + `kubeseal` on the Mac
 
 ```bash
 brew install helm kubeseal
 ```
 
-### 3.4 Confirm the default storage class
+### 3.6 Confirm the default storage class
 
 ```bash
 kubectl get sc    # local-path (default)
@@ -337,7 +471,7 @@ resources:
 
 ### 5.2 First install (by hand)
 
-Pin to a known-good chart version (check https://github.com/bitnami-labs/sealed-secrets/releases for the latest):
+Pin to a known-good chart version (check <https://github.com/bitnami-labs/sealed-secrets/releases> for the latest):
 
 ```bash
 helm repo add sealed-secrets https://bitnami-labs.github.io/sealed-secrets
@@ -470,13 +604,13 @@ kubectl create secret generic argocd-secret \
 
 ```yaml
 global:
-  domain: argo.<your-domain>               # used in Phase 7 when tunnel goes up
+  domain: argo.spaderlabs.com               # used in Phase 7 when tunnel goes up
 
 configs:
   params:
     server.insecure: "true"                # Cloudflare terminates TLS; ArgoCD speaks HTTP internally
   cm:
-    url: https://argo.<your-domain>
+    url: https://argo.spaderlabs.com
     timeout.reconciliation: 180s
     application.instanceLabelKey: argocd.argoproj.io/instance
   secret:
@@ -520,7 +654,7 @@ kubectl create namespace argocd
 kubectl apply -f platform/argocd/admin-password.sealedsecret.yaml
 ```
 
-Then install ArgoCD. Pin to a known-good chart version (https://github.com/argoproj/argo-helm/releases):
+Then install ArgoCD. Pin to a known-good chart version (<https://github.com/argoproj/argo-helm/releases>):
 
 ```bash
 helm repo add argo https://argoproj.github.io/argo-helm
@@ -696,7 +830,7 @@ Plus a `platform/namespaces/app.yaml` Argo Application pointing at `platform/nam
 
 ## Phase 7 — Cloudflare Tunnel via Helm + expose ArgoCD (~1 hr)
 
-**Goal:** one shared tunnel that any tenant can attach a public hostname to (e.g. `argo.<your-domain>`, later `api-homelab.rookia.com`, `vault.<personal-domain>`, etc.). Deployed via the official Cloudflare Helm chart, with the tunnel token stored as a SealedSecret from Phase 5. First public hostname exposes ArgoCD behind Cloudflare Access.
+**Goal:** one shared tunnel that any tenant can attach a public hostname to (e.g. `argo.spaderlabs.com`, later `api-homelab.rookia.com`, `vault.spaderlabs.com`, etc.). Deployed via the official Cloudflare Helm chart, with the tunnel token stored as a SealedSecret from Phase 5. First public hostname exposes ArgoCD behind Cloudflare Access.
 
 ### 7.1 Create the tunnel in Cloudflare
 
@@ -740,7 +874,7 @@ resources:
   limits:   { cpu: 200m, memory: 128Mi }
 ```
 
-> Chart docs: https://github.com/cloudflare/helm-charts/tree/main/charts/cloudflare-tunnel-remote. Pin the chart version in `app.yaml`.
+> Chart docs: <https://github.com/cloudflare/helm-charts/tree/main/charts/cloudflare-tunnel-remote>. Pin the chart version in `app.yaml`.
 
 ### 7.4 Application manifest
 
@@ -793,15 +927,15 @@ In the Cloudflare dashboard, the tunnel should show **HEALTHY** with 2 connector
 In the tunnel (Cloudflare dashboard) → **Public Hostname → Add public hostname**:
 
 - **Subdomain:** `argo`
-- **Domain:** `<your-domain>`
+- **Domain:** `spaderlabs.com`
 - **Service:** `http://argocd-server.argocd.svc.cluster.local:80`
 
-In Cloudflare → **Zero Trust → Access → Applications**, create a self-hosted application for `argo.<your-domain>`:
+In Cloudflare → **Zero Trust → Access → Applications**, create a self-hosted application for `argo.spaderlabs.com`:
 
 - Policy: require login from your email address.
 - Optional: add a 2FA requirement.
 
-Browse to `https://argo.<your-domain>` — Cloudflare Access prompts first, then ArgoCD shows the login screen. Log in as `admin` with the password from 6.1.
+Browse to `https://argo.spaderlabs.com` — Cloudflare Access prompts first, then ArgoCD shows the login screen. Log in as `admin` with the password from 6.1.
 
 ### 7.6 LAN-only services
 
@@ -811,7 +945,7 @@ For services that should NOT be public (Pi-hole admin UI, Home Assistant, etc.),
 
 - `kubectl -n cloudflared get pods` — 2 Running, no CrashLoopBackOff.
 - Cloudflare tunnel status **HEALTHY**.
-- `curl -I https://argo.<your-domain>` — 200 OK, TLS valid (CF terminates), Access challenge appears in a browser.
+- `curl -I https://argo.spaderlabs.com` — 200 OK, TLS valid (CF terminates), Access challenge appears in a browser.
 - Editing `platform/cloudflared/values.yaml` (e.g. bump `replicaCount` to 3 and back) rolls through ArgoCD with no manual steps.
 
 ---
