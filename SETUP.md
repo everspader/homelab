@@ -21,9 +21,19 @@ HA control plane, multi-node, on-cluster Postgres (Neon stays remote for Rookia)
 ## Tenancy model
 
 - Cluster is **multi-tenant by namespace**. One namespace per logical app (`rookia`, `pihole`, `homeassistant`, ...).
-- Cluster-wide infrastructure (Cloudflare Tunnel, ArgoCD, Sealed Secrets) lives under `platform/` in the GitOps repo and `argocd` / `cloudflared` / `sealed-secrets` namespaces.
+- Cluster-wide infrastructure (Sealed Secrets, ArgoCD, Cloudflare Tunnel) lives under `platform/` in the GitOps repo and `sealed-secrets` / `argocd` / `cloudflared` namespaces.
 - Each tenant gets its own ArgoCD Application, its own SealedSecret, and (where applicable) its own Cloudflare Tunnel public hostname.
 - Resource budgets enforced via `ResourceQuota` per namespace so one runaway tenant can't OOM another.
+
+## Build order at a glance
+
+1. **Phase 0–2** — hardware, Debian, hardening. Bare host ready.
+2. **Phase 3** — k3s installed, `kubectl` works from the Mac.
+3. **Phase 4** — GitOps repo skeleton in place.
+4. **Phase 5** — Sealed Secrets controller installed via Helm. `kubeseal` can encrypt anything we'll need next (Cloudflare tunnel token, ArgoCD admin password, Rookia `.env`).
+5. **Phase 6** — ArgoCD installed via Helm, self-managing via the repo. Initial access via `kubectl port-forward`.
+6. **Phase 7** — Cloudflare Tunnel via Helm, token stored as a SealedSecret. First public hostname points at ArgoCD behind Cloudflare Access.
+7. **Phase 8+** — build Rookia images, deploy API + worker, cut over from Railway, backups, more tenants.
 
 ---
 
@@ -108,7 +118,7 @@ ssh-copy-id home@homelab.local
 ssh home@homelab.local                # should now be passwordless
 ```
 
-Verify passwordless **before moving on** — Phase 3 disables password SSH.
+Verify passwordless **before moving on** — Phase 2 disables password SSH.
 
 ### 1.6 Update the system
 
@@ -168,8 +178,10 @@ sudo dpkg-reconfigure -plow unattended-upgrades
 ### 2.4 Install basic tools
 
 ```bash
-sudo apt install -y htop vim curl git tmux ca-certificates lsb-release
+sudo apt install -y htop vim curl git tmux ca-certificates lsb-release apache2-utils
 ```
+
+(`apache2-utils` ships `htpasswd`, used in Phase 6 to bcrypt the ArgoCD admin password.)
 
 ### 2.5 Confirm cgroup v2 + memory controller (Debian 12 default; just verify)
 
@@ -226,7 +238,13 @@ kubectl get nodes
 
 Persist `KUBECONFIG` in `~/.zshrc` (or merge into `~/.kube/config` with `KUBECONFIG=~/.kube/config:~/.kube/homelab.yaml kubectl config view --flatten > ~/.kube/merged && mv ~/.kube/merged ~/.kube/config`).
 
-### 3.3 Confirm the default storage class
+### 3.3 Install `helm` + `kubeseal` on the Mac
+
+```bash
+brew install helm kubeseal
+```
+
+### 3.4 Confirm the default storage class
 
 ```bash
 kubectl get sc    # local-path (default)
@@ -238,74 +256,17 @@ PVCs land on NVMe under `/var/lib/rancher/k3s/storage/`.
 
 ---
 
-## Phase 4 — Cloudflare Tunnel ingress (~1 hr)
-
-**Goal:** one shared tunnel that any tenant can attach a public hostname to (e.g. `pi-test.rookia.com`, later `argo.<personal-domain>`, `vault.<personal-domain>`, etc.).
-
-### 4.1 Create the tunnel in Cloudflare
-
-In Cloudflare → **Zero Trust → Networks → Tunnels → Create tunnel**:
-
-- Name: `homelab`
-- Copy the install token shown after creation.
-
-> One tunnel per cluster. Each tenant adds public hostnames to **this same tunnel**, not new tunnels.
-
-### 4.2 Deploy `cloudflared` in-cluster
-
-Create the namespace and the token Secret:
-
-```bash
-kubectl create namespace cloudflared
-kubectl -n cloudflared create secret generic tunnel-token \
-  --from-literal=token=<TOKEN>
-```
-
-Apply a Deployment running `cloudflare/cloudflared:latest` with:
-
-- args: `tunnel --no-autoupdate run --token $(TUNNEL_TOKEN)`
-- env from the Secret
-- 2 replicas (zero-downtime rollouts; fine on a single node)
-
-### 4.3 Sanity hello pod
-
-In the `default` namespace for now (will move to per-tenant namespaces from Phase 6 onward):
-
-```bash
-kubectl create deployment hello --image=nginxdemos/hello --port=80
-kubectl expose deployment hello --port=80
-```
-
-In tunnel → **Public hostname**:
-
-- Hostname: `homelab-test.rookia.com` (or any subdomain you control)
-- Service: `http://hello.default.svc.cluster.local:80`
-
-### 4.4 LAN-only services
-
-For services that should NOT be public (Pi-hole admin UI, Home Assistant, etc.), do not add a public hostname. Reach them via NodePort, `kubectl port-forward`, or set up Tailscale (optional Phase 14).
-
-**Verify:**
-
-```bash
-curl https://homelab-test.rookia.com   # nginx hello page
-```
-
-TLS valid (CF terminates).
-
----
-
-## Phase 5 — `homelab` GitOps repo skeleton (~30 min)
+## Phase 4 — `homelab` GitOps repo skeleton (~30 min)
 
 **Goal:** create the repo where every Helm values file, SealedSecret, and Argo Application will live. Subsequent phases commit into this repo before the cluster ever sees them.
 
-### 5.1 Repo layout
+### 4.1 Repo layout
 
 Create a new private GitHub repo `homelab`:
 
 ```text
 bootstrap/                       # one-shot manifests applied by hand
-  root-app.yaml                  # the root Argo Application (Phase 7)
+  root-app.yaml                  # the root Argo Application (Phase 6)
 platform/                        # cluster-wide infra; each subdir == one Argo Application
   sealed-secrets/
     values.yaml                  # Helm values
@@ -315,8 +276,9 @@ platform/                        # cluster-wide infra; each subdir == one Argo A
     app.yaml                     # Argo Application (self-managing)
     admin-password.sealedsecret.yaml
   cloudflared/
-    deployment.yaml
-    app.yaml
+    values.yaml                  # Helm values for the cloudflare-tunnel chart
+    app.yaml                     # Argo Application (Helm source)
+    tunnel-token.sealedsecret.yaml
   namespaces/                    # Namespace + ResourceQuota per tenant
     rookia.yaml
 tenants/
@@ -331,14 +293,14 @@ tenants/
     manifests/
 ```
 
-### 5.2 Clone locally
+### 4.2 Clone locally
 
 ```bash
 git clone git@github.com:<you>/homelab.git
 cd homelab
 ```
 
-### 5.3 Add a `.gitignore`
+### 4.3 Add a `.gitignore`
 
 ```text
 # Decrypted secrets — never commit
@@ -357,11 +319,11 @@ Commit and push the empty skeleton.
 
 ---
 
-## Phase 6 — Sealed Secrets via Helm (~30 min)
+## Phase 5 — Sealed Secrets via Helm (~30 min)
 
-**Goal:** Sealed Secrets controller installed and self-managing via Helm + GitOps. Required before ArgoCD so the ArgoCD admin password can be stored as a SealedSecret.
+**Goal:** Sealed Secrets controller installed via Helm. `kubeseal` on the Mac can encrypt any Secret into a committable `SealedSecret`. Installed **before** ArgoCD and Cloudflare so their sensitive config (ArgoCD admin password, tunnel token) can be declared in git from day one.
 
-### 6.1 Helm values
+### 5.1 Helm values
 
 `platform/sealed-secrets/values.yaml`:
 
@@ -373,7 +335,7 @@ resources:
   limits:   { cpu: 200m, memory: 128Mi }
 ```
 
-### 6.2 First install (by hand)
+### 5.2 First install (by hand)
 
 Pin to a known-good chart version (check https://github.com/bitnami-labs/sealed-secrets/releases for the latest):
 
@@ -393,21 +355,15 @@ Wait for the controller:
 kubectl -n sealed-secrets rollout status deploy/sealed-secrets
 ```
 
-### 6.3 Install `kubeseal` CLI on the Mac
-
-```bash
-brew install kubeseal
-```
-
-Fetch the cluster's public cert (used to encrypt every SealedSecret going forward):
+### 5.3 Fetch the public cert
 
 ```bash
 kubeseal --fetch-cert > pub-cert.pem
 ```
 
-Keep `pub-cert.pem` local. It's not secret, but it's gitignored to avoid clutter.
+Keep `pub-cert.pem` local. It's not secret, but it's gitignored to avoid clutter. Every `kubeseal` invocation in the rest of this plan uses `--cert pub-cert.pem`.
 
-### 6.4 Back up the controller's private key — **do this now**
+### 5.4 Back up the controller's private key — **do this now**
 
 Without this file, every SealedSecret in `homelab` becomes useless on a fresh cluster.
 
@@ -419,7 +375,7 @@ kubectl -n sealed-secrets get secret \
 
 Move this file into 1Password / Bitwarden / encrypted USB. Delete the local copy.
 
-### 6.5 Self-management Application (declared now, applied in Phase 7)
+### 5.5 Self-management Application (declared now, applied in Phase 6)
 
 `platform/sealed-secrets/app.yaml`:
 
@@ -453,35 +409,34 @@ spec:
       - CreateNamespace=true
 ```
 
-Commit and push. ArgoCD will adopt the existing controller in Phase 7.
+Commit and push. ArgoCD will adopt the existing controller in Phase 6.
 
-### 6.6 First SealedSecret: Rookia's `.env`
+### 5.6 Smoke test `kubeseal`
+
+Create a throwaway sealed secret to confirm the round-trip works:
 
 ```bash
-kubectl create secret generic api-env \
-  -n rookia \
-  --from-env-file=.env \
+kubectl create secret generic smoke \
+  --from-literal=hello=world \
   --dry-run=client -o yaml \
   | kubeseal --cert pub-cert.pem -o yaml \
-  > tenants/rookia/manifests/sealed-env.yaml
+  > /tmp/smoke.sealed.yaml
+
+kubectl apply -f /tmp/smoke.sealed.yaml
+kubectl get secret smoke -o jsonpath='{.data.hello}' | base64 -d   # → world
+kubectl delete sealedsecret smoke
+rm /tmp/smoke.sealed.yaml
 ```
 
-Commit `sealed-env.yaml` only — never the raw `.env`.
-
-**Verify:** Once the `rookia` namespace exists (Phase 7 / 9), this will decrypt cleanly:
-
-```bash
-kubectl -n rookia get secret api-env \
-  -o jsonpath='{.data.DATABASE_URL}' | base64 -d
-```
+**Verify:** `kubeseal` encrypts, controller decrypts, Secret materialises, cleanup works.
 
 ---
 
-## Phase 7 — ArgoCD via Helm + self-management (~1.5 hr)
+## Phase 6 — ArgoCD via Helm + self-management (~1.5 hr)
 
-**Goal:** ArgoCD installed via Helm, with all configuration (UI hostname, admin password, RBAC, resource limits, repo creds) declared as files in `homelab`. After bootstrap, ArgoCD reads its own `Application` from the repo and updates itself on every push. The only command you'll ever rerun by hand is the one in 7.5 if you wipe the cluster.
+**Goal:** ArgoCD installed via Helm, with all configuration (admin password, RBAC, resource limits, repo creds) declared in `homelab`. After bootstrap, ArgoCD reads its own `Application` from the repo and updates itself on every push. Initial access is via `kubectl port-forward` — the public hostname behind Cloudflare Access comes in Phase 7.
 
-### 7.1 Generate the admin password as a SealedSecret
+### 6.1 Generate the admin password as a SealedSecret
 
 ArgoCD reads its admin password from a Secret named `argocd-secret`, key `admin.password` (bcrypt hash) plus `admin.passwordMtime`.
 
@@ -509,23 +464,23 @@ kubectl create secret generic argocd-secret \
   > platform/argocd/admin-password.sealedsecret.yaml
 ```
 
-### 7.2 Helm values
+### 6.2 Helm values
 
 `platform/argocd/values.yaml`:
 
 ```yaml
 global:
-  domain: argo.<your-domain>
+  domain: argo.<your-domain>               # used in Phase 7 when tunnel goes up
 
 configs:
   params:
-    server.insecure: "true"           # Cloudflare terminates TLS; ArgoCD speaks HTTP internally
+    server.insecure: "true"                # Cloudflare terminates TLS; ArgoCD speaks HTTP internally
   cm:
     url: https://argo.<your-domain>
     timeout.reconciliation: 180s
     application.instanceLabelKey: argocd.argoproj.io/instance
   secret:
-    createSecret: false               # we manage argocd-secret ourselves (admin-password.sealedsecret.yaml)
+    createSecret: false                    # we manage argocd-secret ourselves
 
 controller:
   resources:
@@ -551,12 +506,12 @@ applicationSet:
     limits:   { cpu: 100m, memory: 128Mi }
 
 notifications:
-  enabled: false                      # add later when wiring Slack / Discord alerts
+  enabled: false
 dex:
-  enabled: false                      # add later if you want OIDC SSO
+  enabled: false
 ```
 
-### 7.3 First install (by hand)
+### 6.3 First install (by hand)
 
 Apply the namespace and the admin password SealedSecret first:
 
@@ -583,21 +538,17 @@ Wait for rollout:
 kubectl -n argocd rollout status deploy/argocd-server
 ```
 
-### 7.4 Cloudflare Tunnel hostname + Access policy
+### 6.4 First login via port-forward
 
-In the tunnel from Phase 4, add a public hostname:
+No public hostname yet. From the Mac:
 
-- **Hostname:** `argo.<your-domain>`
-- **Service:** `http://argocd-server.argocd.svc.cluster.local:80`
+```bash
+kubectl -n argocd port-forward svc/argocd-server 8080:80
+```
 
-In Cloudflare → **Zero Trust → Access → Applications**, create a self-hosted application for `argo.<your-domain>`:
+Browse to `http://localhost:8080`, log in as `admin` with the password from 6.1. Stop port-forward once you've confirmed login works.
 
-- Policy: require login from your email address.
-- Optional: add a 2FA requirement.
-
-Browse to `https://argo.<your-domain>` — Cloudflare prompts you, then ArgoCD shows the login screen. Log in as `admin` with the password from 7.1.
-
-### 7.5 Bootstrap the root Application
+### 6.5 Bootstrap the root Application (app-of-apps)
 
 `bootstrap/root-app.yaml`:
 
@@ -623,7 +574,7 @@ spec:
     automated: { selfHeal: true, prune: true }
 ```
 
-This Application discovers every `app.yaml` under `platform/*/` and `tenants/*/` and creates an Argo Application for each. That's the "app-of-apps" pattern.
+This Application discovers every `app.yaml` under `platform/*/` and `tenants/*/` and creates an Argo Application for each.
 
 Apply once:
 
@@ -631,7 +582,7 @@ Apply once:
 kubectl apply -f bootstrap/root-app.yaml
 ```
 
-### 7.6 Self-management Application for ArgoCD
+### 6.6 Self-management Application for ArgoCD
 
 `platform/argocd/app.yaml`:
 
@@ -648,7 +599,7 @@ spec:
   sources:
     - chart: argo-cd
       repoURL: https://argoproj.github.io/argo-helm
-      targetRevision: <pinned>     # same version pinned in 7.3
+      targetRevision: <pinned>              # same version pinned in 6.3
       helm:
         valueFiles:
           - $values/platform/argocd/values.yaml
@@ -659,15 +610,15 @@ spec:
     server: https://kubernetes.default.svc
     namespace: argocd
   syncPolicy:
-    automated: { selfHeal: true, prune: false }   # don't auto-prune ArgoCD's own resources
+    automated: { selfHeal: true, prune: false }
     syncOptions:
-      - ServerSideApply=true                      # adopts the helm-installed resources cleanly
-      - CreateNamespace=false                     # already created in 7.3
+      - ServerSideApply=true
+      - CreateNamespace=false
 ```
 
-Push. Within a couple minutes the root Application picks it up; the new `argocd` Application adopts the running install. From here on, edit `values.yaml`, push, ArgoCD updates itself.
+Push. Within a couple minutes the root Application picks it up; the `argocd` Application adopts the Helm install. From here on, edit `values.yaml`, push, ArgoCD updates itself.
 
-### 7.7 Repo access (private repos only)
+### 6.7 Repo access (private repos only)
 
 If `homelab` is private, ArgoCD needs a read-only deploy key.
 
@@ -675,7 +626,7 @@ If `homelab` is private, ArgoCD needs a read-only deploy key.
 ssh-keygen -t ed25519 -f ./homelab-deploy-key -N "" -C "argocd@homelab"
 ```
 
-Add `./homelab-deploy-key.pub` as a Deploy Key on the GitHub repo (read-only, no write access).
+Add `./homelab-deploy-key.pub` as a Deploy Key on the GitHub repo (read-only).
 
 Encrypt the private key as a SealedSecret in the `argocd` namespace:
 
@@ -707,13 +658,9 @@ kubeseal --cert pub-cert.pem -o yaml \
 rm /tmp/homelab-repo.secret.yaml ./homelab-deploy-key
 ```
 
-Commit `homelab-repo.sealedsecret.yaml`. ArgoCD will discover it and use the deploy key for all subsequent syncs.
+Commit. ArgoCD discovers it and uses the deploy key for subsequent syncs.
 
-### 7.8 Pull in the rest of `platform/`
-
-Drop in the cloudflared and namespaces Argo Applications:
-
-`platform/cloudflared/app.yaml` — points at `platform/cloudflared/` for raw manifests. Move the manual cloudflared Deployment from Phase 4 into `platform/cloudflared/deployment.yaml`. Push.
+### 6.8 Add the namespaces Application
 
 `platform/namespaces/rookia.yaml`:
 
@@ -736,16 +683,136 @@ spec:
     limits.memory: "4Gi"
 ```
 
-(NucBox has 16GB / 4C-8T headroom — quotas can be more generous than the Pi version.)
-
-Plus a `platform/namespaces/app.yaml` Argo Application pointing at `platform/namespaces/`.
+Plus a `platform/namespaces/app.yaml` Argo Application pointing at `platform/namespaces/` (raw manifest source).
 
 **Verify:**
 
-- `kubectl -n argocd get application` shows `root`, `argocd`, `sealed-secrets`, `cloudflared`, `namespaces` — all `Synced` + `Healthy`.
+- `kubectl -n argocd get application` shows `root`, `argocd`, `sealed-secrets`, `namespaces` — all `Synced` + `Healthy`.
 - `kubectl get ns rookia` exists with the ResourceQuota attached.
-- Edit `platform/argocd/values.yaml` (e.g. bump `server.resources.limits.memory` from 256Mi to 384Mi), commit, push. Within ~3 minutes ArgoCD picks up the change and rolls itself with no human intervention.
-- Browse `https://argo.<your-domain>` — UI loads behind Cloudflare Access, login works.
+- Edit `platform/argocd/values.yaml` (e.g. bump `server.resources.limits.memory` from 256Mi to 384Mi), commit, push. Within ~3 minutes ArgoCD rolls itself with no human intervention.
+- Port-forward still reaches the UI.
+
+---
+
+## Phase 7 — Cloudflare Tunnel via Helm + expose ArgoCD (~1 hr)
+
+**Goal:** one shared tunnel that any tenant can attach a public hostname to (e.g. `argo.<your-domain>`, later `api-homelab.rookia.com`, `vault.<personal-domain>`, etc.). Deployed via the official Cloudflare Helm chart, with the tunnel token stored as a SealedSecret from Phase 5. First public hostname exposes ArgoCD behind Cloudflare Access.
+
+### 7.1 Create the tunnel in Cloudflare
+
+In Cloudflare → **Zero Trust → Networks → Tunnels → Create tunnel → Cloudflared**:
+
+- Name: `homelab`
+- Copy the install token shown after creation. (The token is what `cloudflared` uses to authenticate the connector; hostname routing is configured in the Cloudflare UI.)
+
+> One tunnel per cluster. Each tenant adds public hostnames to **this same tunnel**, not new tunnels.
+
+### 7.2 Encrypt the tunnel token as a SealedSecret
+
+```bash
+kubectl create namespace cloudflared
+kubectl create secret generic tunnel-token \
+  -n cloudflared \
+  --from-literal=token=<TOKEN> \
+  --dry-run=client -o yaml \
+  | kubeseal --cert pub-cert.pem -o yaml \
+  > platform/cloudflared/tunnel-token.sealedsecret.yaml
+```
+
+Commit. Raw token never lands in git — only the sealed form.
+
+### 7.3 Helm values
+
+Using the official Cloudflare chart `cloudflare-tunnel-remote` (remotely-managed tunnel; hostnames configured in the CF dashboard).
+
+`platform/cloudflared/values.yaml`:
+
+```yaml
+cloudflare:
+  tunnel_token_secret:
+    name: tunnel-token
+    key: token
+
+replicaCount: 2                              # zero-downtime rollouts on a single node
+
+resources:
+  requests: { cpu: 25m,  memory: 32Mi }
+  limits:   { cpu: 200m, memory: 128Mi }
+```
+
+> Chart docs: https://github.com/cloudflare/helm-charts/tree/main/charts/cloudflare-tunnel-remote. Pin the chart version in `app.yaml`.
+
+### 7.4 Application manifest
+
+`platform/cloudflared/app.yaml`:
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cloudflared
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  sources:
+    - chart: cloudflare-tunnel-remote
+      repoURL: https://cloudflare.github.io/helm-charts
+      targetRevision: <pinned>
+      helm:
+        valueFiles:
+          - $values/platform/cloudflared/values.yaml
+    - repoURL: https://github.com/<you>/homelab.git
+      targetRevision: HEAD
+      ref: values
+      path: platform/cloudflared            # also sync the SealedSecret from this dir
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cloudflared
+  syncPolicy:
+    automated: { selfHeal: true, prune: true }
+    syncOptions:
+      - ServerSideApply=true
+      - CreateNamespace=true
+```
+
+> Argo's multi-source support applies the Helm chart **and** the raw `tunnel-token.sealedsecret.yaml` (which has `namespace: cloudflared` set) in the same Application. The SealedSecret is decrypted by the Phase 5 controller before the Helm pods start.
+
+Push. Confirm ArgoCD syncs `cloudflared` Healthy:
+
+```bash
+kubectl -n argocd get application cloudflared
+kubectl -n cloudflared get pods                  # 2 cloudflared pods Running
+```
+
+In the Cloudflare dashboard, the tunnel should show **HEALTHY** with 2 connectors.
+
+### 7.5 First public hostname: ArgoCD behind Cloudflare Access
+
+In the tunnel (Cloudflare dashboard) → **Public Hostname → Add public hostname**:
+
+- **Subdomain:** `argo`
+- **Domain:** `<your-domain>`
+- **Service:** `http://argocd-server.argocd.svc.cluster.local:80`
+
+In Cloudflare → **Zero Trust → Access → Applications**, create a self-hosted application for `argo.<your-domain>`:
+
+- Policy: require login from your email address.
+- Optional: add a 2FA requirement.
+
+Browse to `https://argo.<your-domain>` — Cloudflare Access prompts first, then ArgoCD shows the login screen. Log in as `admin` with the password from 6.1.
+
+### 7.6 LAN-only services
+
+For services that should NOT be public (Pi-hole admin UI, Home Assistant, etc.), do not add a public hostname. Reach them via `kubectl port-forward` or set up Tailscale (optional Phase 14).
+
+**Verify:**
+
+- `kubectl -n cloudflared get pods` — 2 Running, no CrashLoopBackOff.
+- Cloudflare tunnel status **HEALTHY**.
+- `curl -I https://argo.<your-domain>` — 200 OK, TLS valid (CF terminates), Access challenge appears in a browser.
+- Editing `platform/cloudflared/values.yaml` (e.g. bump `replicaCount` to 3 and back) rolls through ArgoCD with no manual steps.
 
 ---
 
@@ -810,11 +877,24 @@ For private images, add an `imagePullSecret` in the `rookia` namespace.
 
 ---
 
-## Phase 9 — Deploy API to cluster (~1 hr)
+## Phase 9 — Seal Rookia `.env` + deploy API (~1 hr)
 
-**Goal:** API reachable at `api-pi.rookia.com` (or whatever subdomain), healthy, hitting Neon. Runs in the `rookia` namespace, inside its ResourceQuota.
+**Goal:** API reachable at `api-homelab.rookia.com`, healthy, hitting Neon. Runs in the `rookia` namespace, inside its ResourceQuota.
 
-### 9.1 Manifests
+### 9.1 Seal the Rookia `.env`
+
+```bash
+kubectl create secret generic api-env \
+  -n rookia \
+  --from-env-file=.env \
+  --dry-run=client -o yaml \
+  | kubeseal --cert pub-cert.pem -o yaml \
+  > tenants/rookia/manifests/sealed-env.yaml
+```
+
+Commit `sealed-env.yaml` only — never the raw `.env`.
+
+### 9.2 Manifests
 
 In `tenants/rookia/manifests/api/`:
 
@@ -866,15 +946,13 @@ spec:
       targetPort: 3000
 ```
 
-Plus the `sealed-env.yaml` from Phase 6.
-
-### 9.2 Wire to ArgoCD
+### 9.3 Wire to ArgoCD
 
 Update `tenants/rookia/app.yaml` to point at `tenants/rookia/manifests/`. Push.
 
-### 9.3 Public hostname
+### 9.4 Public hostname
 
-In Cloudflare tunnel, add public hostname:
+In the Cloudflare tunnel, add public hostname:
 
 - **Hostname:** `api-homelab.rookia.com`
 - **Service:** `http://api.rookia.svc.cluster.local:80`
@@ -1076,7 +1154,7 @@ Data lives on NVMe; lost if the homelab dies and you don't have a backup of `/va
 ### 13.5 Networking
 
 - **Public:** add a Cloudflare Tunnel public hostname pointing at `http://<svc>.<name>.svc.cluster.local:<port>`. Add a Cloudflare Access policy if it should be private-but-remote.
-- **LAN-only:** skip the tunnel hostname. Reach via Tailscale (Phase 14) or NodePort.
+- **LAN-only:** skip the tunnel hostname. Reach via Tailscale (Phase 14) or `kubectl port-forward`.
 
 ### 13.6 Sync
 
@@ -1123,7 +1201,7 @@ Or use the operator's `Ingress` class.
 
 ## Key traps (do not skip)
 
-- ArgoCD has a chicken-and-egg: bootstrap once by hand, then let it self-manage.
+- ArgoCD + Sealed Secrets + Cloudflared each have a chicken-and-egg: bootstrap once by hand, then let them self-manage. Install order matters — Sealed Secrets first (Phase 5), then ArgoCD (Phase 6), then Cloudflared (Phase 7, with its token already sealed).
 - pg-boss worker absolutely needs `terminationGracePeriodSeconds: 60` — without it, rolling restarts will drop jobs mid-flight.
 - MercadoPago retries webhooks for ~24h. Short homelab downtime is recoverable; 48h+ is not.
 - **Always set `resources.requests` AND `limits` on every workload.** Without limits, one tenant with a memory leak takes down the whole node — including Rookia.
