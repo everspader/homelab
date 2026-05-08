@@ -5,6 +5,7 @@
 
 # Sealed Secrets material
 pub-cert.pem
+*.pem
 sealed-secrets-key.backup.yaml
 
 # Repo deploy keys
