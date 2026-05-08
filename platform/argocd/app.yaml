@@ -19,14 +19,12 @@ spec:
     - repoURL: https://github.com/everspader/homelab.git
       targetRevision: HEAD
       ref: values
-    # 3. SealedSecrets in this directory — admin pw + GitHub App creds.
+    # 3. Raw manifests under manifests/ — admin pw + GitHub App creds.
     #    Re-seal locally + push = ArgoCD syncs = controller decrypts.
-    #    Filter excludes app.yaml (root manages it) and values.yaml (not a manifest).
+    #    Anything in this dir is a manifest by construction; no filters needed.
     - repoURL: https://github.com/everspader/homelab.git
       targetRevision: HEAD
-      path: platform/argocd
-      directory:
-        include: "*.sealedsecret.yaml"
+      path: platform/argocd/manifests
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd

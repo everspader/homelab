@@ -10,10 +10,7 @@ spec:
   source:
     repoURL: https://github.com/everspader/homelab.git
     targetRevision: HEAD
-    path: platform/namespaces
-    directory:
-      recurse: false
-      exclude: app.yaml      # the Application itself is managed by root, not by this app
+    path: platform/namespaces/manifests
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd        # placeholder; the Namespace/ResourceQuota manifests carry their own namespace

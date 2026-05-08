@@ -25,6 +25,18 @@ host/               Host-level config NOT managed by ArgoCD — symlinked into t
   k3s/config.yaml   → /etc/rancher/k3s/config.yaml on the homelab box
 ```
 
+**Per-component layout convention** — each `platform/<component>/` and `tenants/<tenant>/` directory follows the same structure:
+
+```
+<component>/
+  app.yaml          # ArgoCD Application — managed by root, not by this Application
+  values.yaml       # Helm values referenced via $values (only when the component is a Helm release)
+  manifests/        # raw manifests applied by this Application; everything in here IS a manifest
+    *.yaml          # Namespaces, ResourceQuotas, SealedSecrets, etc.
+```
+
+The `manifests/` subdir is what the Application's source path points at, so no `directory.include`/`exclude` filtering is needed. Components with no raw manifests (e.g. `sealed-secrets` is a pure Helm release) can omit it.
+
 **Install order is load-bearing:** Sealed Secrets (Phase 5) → ArgoCD (Phase 6, initially accessed via `kubectl port-forward`) → Cloudflared (Phase 7, with the tunnel token already sealed). Reversing this means committing plaintext secrets or hand-rolling the tunnel. See `SETUP.md` for the full sequence.
 
 The root Application in `bootstrap/root-app.yaml` recursively includes every `platform/*/app.yaml` and `tenants/*/app.yaml`. Adding a new tenant or platform component = creating a directory with an `app.yaml`; the root picks it up on next sync. Do not hand-register Applications.
