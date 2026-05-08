@@ -6,7 +6,7 @@ This directory is in the repo for diff history and rebuild reproducibility, **no
 
 ## Apply contract
 
-- The repo is cloned to `~/homelab` on the box.
+- The repo is cloned to `/opt/homelab` on the box (owned by `home:home`). `/opt` is world-traversable, so system services like `postgresql` can read symlinked files via this path; `/home/home/` is mode 0750 and would otherwise block them.
 - Files in `host/` are referenced from their canonical system paths via symlink.
 - Editing one of these files in the repo + `git pull` on the box + restarting the relevant service is the full apply path.
 

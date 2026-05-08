@@ -343,15 +343,18 @@ ssh -T git@github.com
 #### 3.1.3 Clone the repo
 
 ```bash
-git clone git@github.com:everspader/homelab.git ~/homelab
-ls ~/homelab/host/k3s/config.yaml   # confirms host/ tree pulled in
+sudo git clone git@github.com:everspader/homelab.git /opt/homelab
+sudo chown -R home:home /opt/homelab
+ls /opt/homelab/host/k3s/config.yaml   # confirms host/ tree pulled in
 ```
+
+**Why `/opt/homelab` and not `~/homelab`:** `/home/home/` is mode 0750 by default; system services (`postgresql`, etc.) running as their own user can't traverse into it to read the symlinked configs. `/opt` is world-traversable, so any service can follow `/etc/.../foo -> /opt/homelab/host/.../foo`.
 
 ### 3.2 Symlink the k3s config
 
 ```bash
 sudo mkdir -p /etc/rancher/k3s
-sudo ln -sf /home/home/homelab/host/k3s/config.yaml /etc/rancher/k3s/config.yaml
+sudo ln -sf /opt/homelab/host/k3s/config.yaml /etc/rancher/k3s/config.yaml
 ls -l /etc/rancher/k3s/config.yaml   # verify the symlink target
 sudo cat /etc/rancher/k3s/config.yaml
 ```
