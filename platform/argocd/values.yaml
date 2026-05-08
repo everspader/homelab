@@ -8,8 +8,28 @@ configs:
     url: https://argo.spaderlabs.com
     timeout.reconciliation: 180s
     application.instanceLabelKey: argocd.argoproj.io/instance
+
+    # GitHub OAuth via Dex. Client ID/Secret are read from argocd-secret
+    # (sealed in platform/argocd/manifests/admin-password.sealedsecret.yaml).
+    # The $key syntax tells Dex to substitute from argocd-secret at runtime.
+    dex.config: |
+      connectors:
+        - type: github
+          id: github
+          name: GitHub
+          config:
+            clientID: $dex.github.clientID
+            clientSecret: $dex.github.clientSecret
+
   secret:
     createSecret: false         # we manage argocd-secret ourselves via SealedSecret
+
+  # RBAC — default-deny. Only users named below get any permissions.
+  # Format reference: https://argo-cd.readthedocs.io/en/stable/operator-manual/rbac/
+  rbac:
+    policy.default: ''
+    policy.csv: |
+      g, everspader, role:admin
 
 controller:
   resources:
@@ -53,7 +73,12 @@ applicationSet:
 notifications:
   enabled: false
 
-# Dex stays disabled for now. Layered in a follow-up step once ArgoCD is verified
-# running with local admin login + the GitHub App's OAuth callback URL is testable.
 dex:
-  enabled: false
+  enabled: true
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
