@@ -7,22 +7,10 @@ metadata:
     - resources-finalizer.argocd.argoproj.io
 spec:
   project: default
-  sources:
-    # 1. Helm chart (with values from source #2)
-    - chart: cloudflare-tunnel-remote
-      repoURL: https://cloudflare.github.io/helm-charts
-      targetRevision: 0.1.2
-      helm:
-        valueFiles:
-          - $values/platform/cloudflared/values.yaml
-    # 2. This repo as $values for the chart (no manifests applied from here)
-    - repoURL: https://github.com/everspader/homelab.git
-      targetRevision: HEAD
-      ref: values
-    # 3. Raw manifests under manifests/ — currently the SealedSecret tunnel-token.
-    - repoURL: https://github.com/everspader/homelab.git
-      targetRevision: HEAD
-      path: platform/cloudflared/manifests
+  source:
+    repoURL: https://github.com/everspader/homelab.git
+    targetRevision: HEAD
+    path: platform/cloudflared/manifests
   destination:
     server: https://kubernetes.default.svc
     namespace: cloudflared
