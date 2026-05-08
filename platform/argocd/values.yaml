@@ -25,11 +25,15 @@ configs:
     createSecret: false         # we manage argocd-secret ourselves via SealedSecret
 
   # RBAC — default-deny. Only users named below get any permissions.
+  # ArgoCD matches the user identifier as: email > preferred_username > name > sub.
+  # The Dex GitHub connector emits the GitHub-verified email in the JWT, so we
+  # match by email here. (Switch to GitHub login by removing email permission
+  # from the App OR by mapping additional `g, <login>, role:admin` lines.)
   # Format reference: https://argo-cd.readthedocs.io/en/stable/operator-manual/rbac/
   rbac:
     policy.default: ''
     policy.csv: |
-      g, everspader, role:admin
+      g, everton.spader@gmail.com, role:admin
 
 controller:
   resources:
