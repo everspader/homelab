@@ -1,0 +1,16 @@
+cloudflare:
+  # Pulls the token from the SealedSecret in platform/cloudflared/manifests/
+  tunnel_token_secret:
+    name: tunnel-token
+    key: token
+
+# Two pods so rollouts don't drop the tunnel mid-upgrade.
+replicaCount: 2
+
+resources:
+  requests:
+    cpu: 25m
+    memory: 32Mi
+  limits:
+    cpu: 200m
+    memory: 128Mi
