@@ -293,34 +293,29 @@ git config --global user.name "Everton Spader"
 
 #### 3.1.2 Generate an SSH key for GitHub access
 
-A dedicated ed25519 key for this box, used as a **read-only Deploy Key** on the homelab repo. Don't reuse your personal GitHub key — the deploy-key pattern scopes access to one repo and is easy to revoke.
+Generate a dedicated ed25519 key on the box (don't reuse your Mac's key — different machines, different keys, easier to revoke):
 
 ```bash
 ssh-keygen -t ed25519 -C "home@homelab" -f ~/.ssh/id_ed25519_homelab -N ""
 cat ~/.ssh/id_ed25519_homelab.pub
 ```
 
-Then on GitHub: **everspader/homelab → Settings → Deploy keys → Add deploy key**. Title: `homelab box (read)`. Paste the public key. **Do not** check "Allow write access" — pulling is enough; pushes happen from your Mac.
+Two ways to authorize this key on GitHub — pick one:
 
-Tell SSH to use this key for `github.com`:
+- **A. Repo-scoped Deploy Key (preferred):** GitHub → `everspader/homelab` → Settings → Deploy keys → Add deploy key. Title: `homelab box (read)`. Paste the public key. **Do not** check "Allow write access". Smallest blast radius if the box is ever compromised; only this one repo is at risk.
+- **B. Personal SSH key:** GitHub → Settings → SSH and GPG keys → New SSH key. The key now authenticates the box as your account, with read+write to *every* repo you own. Convenient if the box will need to clone other repos later (e.g. Rookia source for ad-hoc work). If the box is compromised, every repo is exposed — revoke immediately by deleting the key on GitHub.
+
+The current homelab uses option B because the box may pull additional repos later. ArgoCD (Phase 6.7) will use a separate, repo-scoped Deploy Key regardless — never reuse your personal key for in-cluster machinery.
+
+Pre-trust GitHub's host key and verify:
 
 ```bash
 mkdir -p ~/.ssh && chmod 700 ~/.ssh
-cat >> ~/.ssh/config <<'EOF'
-
-Host github.com
-  HostName github.com
-  User git
-  IdentityFile ~/.ssh/id_ed25519_homelab
-  IdentitiesOnly yes
-EOF
-chmod 600 ~/.ssh/config
-
-# Pre-trust github.com host key so the first clone doesn't prompt
 ssh-keyscan github.com >> ~/.ssh/known_hosts
 
-# Verify
-ssh -T git@github.com   # → "Hi everspader/homelab! You've successfully authenticated..."
+ssh -T git@github.com
+# Option A: "Hi everspader/homelab! You've successfully authenticated..."
+# Option B: "Hi everspader! You've successfully authenticated..."
 ```
 
 #### 3.1.3 Clone the repo
@@ -462,8 +457,8 @@ Commit and push the empty skeleton.
 `platform/sealed-secrets/values.yaml`:
 
 ```yaml
-fullnameOverride: sealed-secrets
-keyrenewperiod: 30d
+fullnameOverride: sealed-secrets-controller   # match kubeseal CLI's default
+keyrenewperiod: 720h                          # 30 days; Go duration parser doesn't accept "d"
 resources:
   requests: { cpu: 50m, memory: 64Mi }
   limits:   { cpu: 200m, memory: 128Mi }

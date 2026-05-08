@@ -1,0 +1,29 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: sealed-secrets
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  sources:
+    - chart: sealed-secrets
+      repoURL: https://bitnami-labs.github.io/sealed-secrets
+      targetRevision: 2.18.5
+      helm:
+        valueFiles:
+          - $values/platform/sealed-secrets/values.yaml
+    - repoURL: https://github.com/everspader/homelab.git
+      targetRevision: HEAD
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: sealed-secrets
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: false
+    syncOptions:
+      - ServerSideApply=true
+      - CreateNamespace=true

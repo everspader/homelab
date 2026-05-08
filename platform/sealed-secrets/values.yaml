@@ -1,0 +1,14 @@
+# Match kubeseal CLI's default lookup ("sealed-secrets-controller"),
+# so `kubeseal --fetch-cert` and friends work without --controller-name.
+fullnameOverride: sealed-secrets-controller
+
+# Rotate the controller's signing key every 30 days.
+keyrenewperiod: 720h    # Go duration parser doesn't accept "d"
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 128Mi
