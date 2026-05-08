@@ -8,15 +8,25 @@ metadata:
 spec:
   project: default
   sources:
+    # 1. The Helm chart (with values from source #2)
     - chart: argo-cd
       repoURL: https://argoproj.github.io/argo-helm
       targetRevision: 9.5.12
       helm:
         valueFiles:
           - $values/platform/argocd/values.yaml
+    # 2. This repo as $values for the chart (no manifests applied from here)
     - repoURL: https://github.com/everspader/homelab.git
       targetRevision: HEAD
       ref: values
+    # 3. SealedSecrets in this directory — admin pw + GitHub App creds.
+    #    Re-seal locally + push = ArgoCD syncs = controller decrypts.
+    #    Filter excludes app.yaml (root manages it) and values.yaml (not a manifest).
+    - repoURL: https://github.com/everspader/homelab.git
+      targetRevision: HEAD
+      path: platform/argocd
+      directory:
+        include: "*.sealedsecret.yaml"
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd

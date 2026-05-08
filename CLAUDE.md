@@ -65,6 +65,20 @@ kubectl create secret generic api-env -n rookia \
   > tenants/rookia/manifests/sealed-env.yaml
 ```
 
+## Updating secrets
+
+Every committed secret in this repo is a `SealedSecret` referenced by an ArgoCD `Application`. Workflow to change a secret's value:
+
+1. Edit the plaintext source (your gitignored `.env`, or a fresh `kubectl create secret ... --dry-run=client -o yaml` invocation). The plaintext file never leaves your Mac.
+2. Pipe it through `kubeseal --cert pub-cert.pem -o yaml > <path>.sealedsecret.yaml`. The `<path>` matches what the owning Application's `directory.include` selects (`*.sealedsecret.yaml` by convention).
+3. `git add && git commit && git push`. ArgoCD picks up the change on its next sync (~3 min via polling, near-instant once GitHub webhooks are wired in Phase 7).
+4. Sealed Secrets controller decrypts the new manifest and overwrites the underlying `Secret`.
+5. **Pods do not auto-restart on Secret change.** Bounce the consumer manually: `kubectl rollout restart deploy/<name> -n <namespace>`. (Same caveat as plain Kubernetes `Secret`s — env is read at pod start.)
+
+`argocd-secret` is a special case: ArgoCD doesn't watch its own admin password Secret, so re-sealing requires `kubectl rollout restart deploy/argocd-server -n argocd` afterward.
+
+If the new SealedSecret name + namespace don't match an existing Secret, the controller creates a new one. The default scope is `(namespace, name)` strict — moving a sealed file to a different namespace breaks decryption. Re-seal under the new identity rather than copying.
+
 No lint/test/build step for this repo itself — validation is "ArgoCD syncs without error." For local sanity-checking manifests before pushing: `kubectl apply --dry-run=client -f <file>` or `kubectl kustomize` when kustomize is in play.
 
 ## Commits
