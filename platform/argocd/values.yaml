@@ -32,8 +32,15 @@ configs:
   # Format reference: https://argo-cd.readthedocs.io/en/stable/operator-manual/rbac/
   rbac:
     policy.default: ''
+    # ArgoCD's RBAC subject resolution depends on the version + JWT shape.
+    # We map all three identifiers from the Dex GitHub JWT (email,
+    # preferred_username, encoded sub) to admin so whichever the enforcer
+    # actually checks against will hit. Once verified working, can be
+    # narrowed down to the one that's actually matching.
     policy.csv: |
       g, everton.spader@gmail.com, role:admin
+      g, everspader, role:admin
+      g, Cgg0NzY4NzY5MhIGZ2l0aHVi, role:admin
 
 controller:
   resources:
