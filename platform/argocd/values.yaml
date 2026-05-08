@@ -1,0 +1,59 @@
+global:
+  domain: argo.spaderlabs.com   # used in Phase 7 when Cloudflare Tunnel exposes this
+
+configs:
+  params:
+    server.insecure: "true"     # Cloudflare terminates TLS; ArgoCD speaks plain HTTP internally
+  cm:
+    url: https://argo.spaderlabs.com
+    timeout.reconciliation: 180s
+    application.instanceLabelKey: argocd.argoproj.io/instance
+  secret:
+    createSecret: false         # we manage argocd-secret ourselves via SealedSecret
+
+controller:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+server:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+  service:
+    type: ClusterIP             # exposed via Cloudflare Tunnel, not LoadBalancer
+
+repoServer:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+applicationSet:
+  enabled: true
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+notifications:
+  enabled: false
+
+# Dex stays disabled for now. Layered in a follow-up step once ArgoCD is verified
+# running with local admin login + the GitHub App's OAuth callback URL is testable.
+dex:
+  enabled: false
