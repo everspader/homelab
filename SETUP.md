@@ -35,6 +35,7 @@ Things deliberately deferred — not blocking, but write down before they're for
 - [ ] **Failure alerting on `pgbackrest@full.service`.** systemd `OnFailure=` hook to push a notification (email, Discord, ntfy, etc.) so a silently-failing weekly backup is caught before the cluster needs restoring.
 - [ ] **R2 bucket versioning + delete protection** on `tally-backup`. Mitigates accidental or malicious deletion of all backups via a compromised API key.
 - [ ] **Add `rookia_homelab` database + role** when Phase 9 starts. Same isolation pattern as `tally`: dedicated role, CONNECT revoked from PUBLIC.
+- [ ] **Install Reflector for cluster-wide imagePullSecret** once we hit 4+ tenants pulling from GHCR. Right now each tenant duplicates `ghcr-pull` SealedSecret; Reflector lets one source Secret mirror itself into N namespaces by annotation. Migration is trivial — one platform Application, then drop per-tenant SealedSecrets in favor of an annotation reference.
 
 ## Assumptions
 

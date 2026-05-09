@@ -1,0 +1,14 @@
+---
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  name: ghcr-pull
+  namespace: rookia
+spec:
+  encryptedData:
+    .dockerconfigjson: AgDeQgP+6+0lC/Slczeod53on907GiurMEns8rH3I1FA2DKY8+MZ0/7qyAqT4fDZ3+/QH5lSxXum5X1vSLCSsGo1mOFXcUf7IFj0N+2piNsuW2gH2EBjkBchXxQkHKo146l3YlGvo61Zvdu4V9HW14tr1LsCrBNF3C8JU+qcaFKUsyBcjUBIVq2UL1BoryTrUmYRhYhAV+XlFS9ZWW5AF3r9P6T7fqs2479+SgZik2RXBFHk3uZWZ/QOrt0Kr/RtAgOBpGH3+byN1J69Wt51aCCeN/LlKe5Pc/98yb/sX7uELUGqdHZ4It0hZ1PWleB/mIcd2KgO4Cd71FXf2Y2XBaJlVNE2JXa54xphW3noQHVEHjMhS7DHRq9xG5uFGf6m6+OwtGvpe7xOmEdAwcdtro6IX1T6sC/HWzEWOnJQV4goKy3c3zSTMsY1aIMTm6XspT1fHjXpAj8O3z5pGPn8o1EB6qC+n8cZbtUvA8WsL/KgSZ4RoMz2jR8EhxqpJsGUP33ykGeiwf6zKuEYiPPEP+i7KFyxSOGKrfI99hnt0lUZ8JQPQdWKrNxwYZUuiJz6E149Kzo6mn5dG4mrUyY2X9VCo1naa/LKRCYQK3l1vgVaO61tFwinOxNPLMSV5Z3mjKKvstP0I+iABEzmiNQkBWrjIpYtbb3FDQISEYWlkyNd7MvePJ3203ND7yjonDrM+aD/noNeE4SEbawwId4Ps2ikvrTY1KHa8TGmAhuOC1j/qUvB4fzgn8KjOYjuxY/yLpE3OkRiJvN72/YhVDyqqAZ5WK1PJtHssKKtWGgv1FTaPzRxeuoktFMoC3+wlpW3s5gjlQYjMpzhVP79XOE5RRElfXMGcUjtTMAsTzQU1MSX4t7P+VuN+1hjMb1ZxW0EUKF3j87fEmHXPd8KDJuDMNSGcgGoV9m1FfVYvsq//ebrRxxdF9u2gy7UytIC7r9ncB9wXeTsH5AkMaUnaEoWP2ob/udzfOZB
+  template:
+    metadata:
+      name: ghcr-pull
+      namespace: rookia
+    type: kubernetes.io/dockerconfigjson

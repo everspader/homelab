@@ -1,0 +1,25 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: rookia-shared
+  namespace: argocd
+  # Earlier sync wave so secrets exist before api/worker pods try to start.
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/everspader/homelab.git
+    targetRevision: HEAD
+    path: tenants/rookia/shared/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: rookia
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: false       # never auto-prune secrets — pods would break
+    syncOptions:
+      - ServerSideApply=true

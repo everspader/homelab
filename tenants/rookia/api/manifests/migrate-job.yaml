@@ -1,0 +1,52 @@
+# Drizzle migrations for the Rookia API.
+# PreSync hook: runs before the api Deployment on every sync. Failure aborts
+# the sync — old pods keep serving on the old schema, new image doesn't ship.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  generateName: rookia-api-migrate-
+  namespace: rookia
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 0                        # fail loud
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: Never
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: migrate
+          image: ghcr.io/everspader/rookia-api:0.10.0    # bump in lockstep with the api Deployment
+          imagePullPolicy: IfNotPresent
+          # Image's WORKDIR is /app/apps/api; the api package.json's "db:migrate"
+          # script runs packages/core/src/db/migrate.ts against the bundled
+          # packages/core/drizzle/ migrations directory.
+          command: ["bun", "run", "db:migrate"]
+          envFrom:
+            - secretRef:
+                name: rookia-env
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

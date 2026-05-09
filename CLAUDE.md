@@ -79,13 +79,24 @@ kubectl create secret generic api-env -n rookia \
 
 ## Updating secrets
 
-Every committed secret in this repo is a `SealedSecret` referenced by an ArgoCD `Application`. Workflow to change a secret's value:
+Every committed secret in this repo is a `SealedSecret` referenced by an ArgoCD `Application`. The plaintext source — typically a per-tenant `.env` file at `tenants/<tenant>/.env` — is gitignored (`*.env` rule covers it). It lives on your Mac only.
 
-1. Edit the plaintext source (your gitignored `.env`, or a fresh `kubectl create secret ... --dry-run=client -o yaml` invocation). The plaintext file never leaves your Mac.
-2. Pipe it through `kubeseal --cert pub-cert.pem -o yaml > <path>.sealedsecret.yaml`. The `<path>` matches what the owning Application's `directory.include` selects (`*.sealedsecret.yaml` by convention).
-3. `git add && git commit && git push`. ArgoCD picks up the change on its next sync (~3 min via polling, near-instant once GitHub webhooks are wired in Phase 7).
+Standard flow to add or update a tenant's env:
+
+1. Edit the plaintext `tenants/<tenant>/.env` on your Mac.
+2. Re-seal (one command):
+   ```bash
+   kubectl create secret generic <tenant>-env -n <tenant> \
+     --from-env-file=tenants/<tenant>/.env --dry-run=client -o yaml \
+     | kubeseal --cert pub-cert.pem -o yaml \
+     > tenants/<tenant>/<scope>/manifests/sealed-env.yaml
+   ```
+   `<scope>` is `manifests/` for flat tenants (e.g. tally) or `shared/manifests/` for split tenants where the SealedSecret is shared across multiple Applications (e.g. rookia/api + rookia/worker).
+3. `git add && git commit && git push`. ArgoCD picks up the change on the next sync (near-instant via the GitHub webhook).
 4. Sealed Secrets controller decrypts the new manifest and overwrites the underlying `Secret`.
-5. **Pods do not auto-restart on Secret change.** Bounce the consumer manually: `kubectl rollout restart deploy/<name> -n <namespace>`. (Same caveat as plain Kubernetes `Secret`s — env is read at pod start.)
+5. **Pods do not auto-restart on Secret change.** Bounce the consumers: `kubectl rollout restart deploy/<name> -n <tenant>` (one per Deployment that uses the Secret).
+
+Single-key edits (e.g. add one new env var without re-typing all the others) can also use `kubeseal --merge-into <existing-sealedsecret-file>` — same SealedSecret file, additional encrypted key appended without disturbing the rest.
 
 `argocd-secret` is a special case: ArgoCD doesn't watch its own admin password Secret, so re-sealing requires `kubectl rollout restart deploy/argocd-server -n argocd` afterward.
 
