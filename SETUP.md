@@ -27,6 +27,15 @@ _Last updated: 2026-05-08._
 | 13    | Adding a new tenant (template; not blocking) | – reference |
 | 14    | Tailscale for LAN-only services              | partial (host-side only) |
 
+## Followups
+
+Things deliberately deferred — not blocking, but write down before they're forgotten.
+
+- [ ] **pgBackRest restore test routine.** Monthly automated restore of the latest backup into a side cluster on a different port; assert key tables still exist; tear down. systemd timer `pgbackrest@verify.timer` would do it.
+- [ ] **Failure alerting on `pgbackrest@full.service`.** systemd `OnFailure=` hook to push a notification (email, Discord, ntfy, etc.) so a silently-failing weekly backup is caught before the cluster needs restoring.
+- [ ] **R2 bucket versioning + delete protection** on `tally-backup`. Mitigates accidental or malicious deletion of all backups via a compromised API key.
+- [ ] **Add `rookia_homelab` database + role** when Phase 9 starts. Same isolation pattern as `tally`: dedicated role, CONNECT revoked from PUBLIC.
+
 ## Assumptions
 
 - GMKtec NucBox G11, 16GB / 512GB NVMe, in hand
