@@ -37,12 +37,16 @@ spec:
           envFrom:
             - secretRef:
                 name: pgboss-pg-creds
+          # Sized to leave headroom in the rookia-quota (limits.cpu hard=2):
+          # api=750m + worker=500m + pgboss=200m = 1450m, leaving 550m for the
+          # migrate Job's 500m hook pod. Actual idle usage is ~7m / 24Mi —
+          # this limit only caps bursts during heavy enqueue periods.
           resources:
             requests:
-              cpu: 100m
+              cpu: 50m
               memory: 128Mi
             limits:
-              cpu: 500m
+              cpu: 200m
               memory: 256Mi
           livenessProbe:
             exec:
