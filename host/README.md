@@ -18,7 +18,6 @@ This directory is in the repo for diff history and rebuild reproducibility, **no
 | `host/postgres/conf.d/00-homelab.conf` | `/etc/postgresql/17/main/conf.d/00-homelab.conf` | `sudo systemctl reload postgresql@17-main` (or restart for `archive_mode` changes) |
 | `host/postgres/pg_hba.conf` | `/etc/postgresql/17/main/pg_hba.conf` | `sudo systemctl reload postgresql@17-main` |
 | `host/postgres/systemd/pgbackrest@.service` | `/etc/systemd/system/pgbackrest@.service` | `sudo systemctl daemon-reload` |
-| `host/postgres/systemd/pgbackrest@diff.timer` | `/etc/systemd/system/pgbackrest@diff.timer` | `sudo systemctl daemon-reload && sudo systemctl restart pgbackrest@diff.timer` |
 | `host/postgres/systemd/pgbackrest@full.timer` | `/etc/systemd/system/pgbackrest@full.timer` | `sudo systemctl daemon-reload && sudo systemctl restart pgbackrest@full.timer` |
 
 ### Reference-only (template, not symlinked)
