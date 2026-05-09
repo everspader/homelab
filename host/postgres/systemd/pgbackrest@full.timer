@@ -1,0 +1,13 @@
+[Unit]
+Description=Weekly pgBackRest full backup
+Documentation=https://pgbackrest.org/
+
+[Timer]
+# Weekly Sunday 02:00 UTC. Runs before the 03:30 diff so Sunday's diff is
+# against a fresh full.
+OnCalendar=Sun *-*-* 02:00:00
+Persistent=true
+RandomizedDelaySec=600
+
+[Install]
+WantedBy=timers.target
