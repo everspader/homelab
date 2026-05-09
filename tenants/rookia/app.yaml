@@ -1,0 +1,34 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: rookia
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/everspader/homelab.git
+    targetRevision: HEAD
+    # Recursively syncs everything under manifests/:
+    #   manifests/sealed-{env,ghcr-pull}.yaml  — secrets shared across services
+    #   manifests/api/                          — api Deployment + Service + PreSync migrate Job
+    #   manifests/worker/                       — pg-boss worker Deployment
+    # Add a new service (e.g. admin UI) by dropping its dir under manifests/.
+    path: tenants/rookia/manifests
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: rookia
+  syncPolicy:
+    automated:
+      selfHeal: true
+      # prune=false because the SealedSecrets are owned here too — we don't
+      # want a renamed file to silently delete the underlying Secret out from
+      # under running pods. Manual prune via `argocd app sync rookia --prune`
+      # when intentional.
+      prune: false
+    syncOptions:
+      - ServerSideApply=true
+      - CreateNamespace=false
