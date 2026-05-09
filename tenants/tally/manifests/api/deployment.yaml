@@ -14,17 +14,17 @@ spec:
     type: RollingUpdate
     rollingUpdate:
       maxSurge: 1
-      maxUnavailable: 0      # zero-downtime even at replicas=1 (new pod ready before old goes away)
+      maxUnavailable: 0 # zero-downtime even at replicas=1 (new pod ready before old goes away)
   template:
     metadata:
       labels:
         app: api
     spec:
       imagePullSecrets:
-        - name: ghcr-pull   # SealedSecret in the same namespace
+        - name: ghcr-pull # SealedSecret in the same namespace
       containers:
         - name: api
-          image: ghcr.io/everspader/tally-api:0.1.0   # bump on each release
+          image: ghcr.io/everspader/tally-api:0.2.0 # bump on each release
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -32,7 +32,7 @@ spec:
               protocol: TCP
           envFrom:
             - secretRef:
-                name: tally-env       # SealedSecret unsealed into this Secret
+                name: tally-env # SealedSecret unsealed into this Secret
           resources:
             requests:
               cpu: 100m
@@ -57,7 +57,7 @@ spec:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             runAsNonRoot: true
-            runAsUser: 1000           # bun image's "bun" user; kubelet needs a numeric UID to enforce runAsNonRoot
+            runAsUser: 1000 # bun image's "bun" user; kubelet needs a numeric UID to enforce runAsNonRoot
             runAsGroup: 1000
             capabilities:
               drop:

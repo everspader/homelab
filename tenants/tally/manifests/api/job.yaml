@@ -5,14 +5,14 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  generateName: tally-api-migrate-       # fresh name per sync (Jobs are immutable)
+  generateName: tally-api-migrate- # fresh name per sync (Jobs are immutable)
   namespace: tally
   annotations:
     argocd.argoproj.io/hook: PreSync
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
 spec:
-  backoffLimit: 0                        # don't retry — fail loud
-  ttlSecondsAfterFinished: 300           # auto-cleanup completed pods after 5 min
+  backoffLimit: 0 # don't retry — fail loud
+  ttlSecondsAfterFinished: 300 # auto-cleanup completed pods after 5 min
   template:
     spec:
       restartPolicy: Never
@@ -20,7 +20,7 @@ spec:
         - name: ghcr-pull
       containers:
         - name: migrate
-          image: ghcr.io/everspader/tally-api:0.1.0   # bump in lockstep with Deployment
+          image: ghcr.io/everspader/tally-api:0.2.0 # bump in lockstep with Deployment
           imagePullPolicy: IfNotPresent
           command: ["bun", "run", "packages/db/src/migrate.ts"]
           envFrom:
