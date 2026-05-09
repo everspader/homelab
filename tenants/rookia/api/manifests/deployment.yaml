@@ -24,7 +24,7 @@ spec:
         - name: ghcr-pull
       containers:
         - name: api
-          image: ghcr.io/everspader/rookia-api:0.10.0
+          image: ghcr.io/everspader/rookia-api:0.10.1
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

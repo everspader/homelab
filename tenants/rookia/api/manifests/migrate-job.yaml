@@ -19,7 +19,7 @@ spec:
         - name: ghcr-pull
       containers:
         - name: migrate
-          image: ghcr.io/everspader/rookia-api:0.10.0    # bump in lockstep with the api Deployment
+          image: ghcr.io/everspader/rookia-api:0.10.1    # bump in lockstep with the api Deployment
           imagePullPolicy: IfNotPresent
           # Image's WORKDIR is /app/apps/api; the api package.json's "db:migrate"
           # script runs packages/core/src/db/migrate.ts against the bundled

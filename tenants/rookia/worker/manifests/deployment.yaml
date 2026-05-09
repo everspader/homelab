@@ -27,7 +27,7 @@ spec:
         - name: ghcr-pull
       containers:
         - name: worker
-          image: ghcr.io/everspader/rookia-api:0.10.0
+          image: ghcr.io/everspader/rookia-api:0.10.1
           imagePullPolicy: IfNotPresent
           # Same image as the API; worker entrypoint overrides the default CMD.
           command: ["bun", "run", "src/worker.ts"]
