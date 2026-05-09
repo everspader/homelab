@@ -16,7 +16,7 @@ metadata:
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
     argocd.argoproj.io/sync-wave: "5"
 spec:
-  backoffLimit: 0                        # fail loud
+  backoffLimit: 0 # fail loud
   ttlSecondsAfterFinished: 300
   template:
     spec:
@@ -25,7 +25,7 @@ spec:
         - name: ghcr-pull
       containers:
         - name: migrate
-          image: ghcr.io/everspader/rookia-api:0.10.1    # bump in lockstep with the api Deployment
+          image: ghcr.io/everspader/rookia-api:0.10.2 # bump in lockstep with the api Deployment
           imagePullPolicy: IfNotPresent
           # Image's WORKDIR is /app/apps/api; the api package.json's "db:migrate"
           # script runs packages/core/src/db/migrate.ts against the bundled

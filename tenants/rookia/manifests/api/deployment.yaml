@@ -27,7 +27,7 @@ spec:
         - name: ghcr-pull
       containers:
         - name: api
-          image: ghcr.io/everspader/rookia-api:0.10.1
+          image: ghcr.io/everspader/rookia-api:0.10.2
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -35,7 +35,7 @@ spec:
               protocol: TCP
           envFrom:
             - secretRef:
-                name: rookia-env       # shared with worker
+                name: rookia-env # shared with worker
           resources:
             requests:
               cpu: 200m
@@ -60,7 +60,7 @@ spec:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             runAsNonRoot: true
-            runAsUser: 1000              # bun base image's user; image's "rookia" user has an unknown system UID
+            runAsUser: 1000 # bun base image's user; image's "rookia" user has an unknown system UID
             runAsGroup: 1000
             capabilities:
               drop:
