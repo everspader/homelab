@@ -1,0 +1,94 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: pgboss-pg
+  namespace: rookia
+  labels:
+    app: pgboss-pg
+spec:
+  serviceName: pgboss-pg
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pgboss-pg
+  template:
+    metadata:
+      labels:
+        app: pgboss-pg
+    spec:
+      # Allow postgres a clean fast-shutdown on rollouts.
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        # postgres image's "postgres" user.
+        fsGroup: 999
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: pg
+              containerPort: 5432
+              protocol: TCP
+          env:
+            # PGDATA must be a subdirectory of the mount, otherwise the postgres
+            # init refuses to write into a non-empty volume root (lost+found etc.)
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          envFrom:
+            - secretRef:
+                name: pgboss-pg-creds
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 999
+            runAsGroup: 999
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: run
+              mountPath: /var/run/postgresql
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        # k3s default: local-path-provisioner. Pin'd to a single node — fine
+        # for this single-node cluster; revisit before scaling out.
+        resources:
+          requests:
+            storage: 1Gi
