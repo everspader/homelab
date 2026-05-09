@@ -5,6 +5,9 @@ metadata:
   namespace: rookia
   labels:
     app: worker
+  annotations:
+    # Same wave as api Deployment — both depend on the migration in wave 5.
+    argocd.argoproj.io/sync-wave: "10"
 spec:
   replicas: 1
   selector:

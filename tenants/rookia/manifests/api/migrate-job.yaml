@@ -1,14 +1,20 @@
 # Drizzle migrations for the Rookia API.
-# PreSync hook: runs before the api Deployment on every sync. Failure aborts
-# the sync — old pods keep serving on the old schema, new image doesn't ship.
+# Sync hook (NOT PreSync) at wave 5. Reasoning:
+#   - PreSync runs before the Sync phase even applies our SealedSecrets,
+#     so the migrate Job would have no rookia-env / ghcr-pull to consume.
+#   - Sync wave 0 (default): SealedSecrets land, controller decrypts them.
+#   - Sync wave 5: this Job runs against the now-existing secrets.
+#   - Sync wave 10: Deployments roll out (api/worker), only after migration.
+# Failure here still aborts the sync — old pods keep serving the old schema.
 apiVersion: batch/v1
 kind: Job
 metadata:
   generateName: rookia-api-migrate-
   namespace: rookia
   annotations:
-    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook: Sync
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "5"
 spec:
   backoffLimit: 0                        # fail loud
   ttlSecondsAfterFinished: 300

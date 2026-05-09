@@ -5,6 +5,9 @@ metadata:
   namespace: rookia
   labels:
     app: api
+  annotations:
+    # Wave 10: after migrate-job (wave 5), which is after SealedSecrets (wave 0).
+    argocd.argoproj.io/sync-wave: "10"
 spec:
   replicas: 1
   selector:
