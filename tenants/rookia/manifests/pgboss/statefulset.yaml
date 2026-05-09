@@ -91,6 +91,9 @@ spec:
         name: data
       spec:
         accessModes: ["ReadWriteOnce"]
+        # k8s admission injects volumeMode=Filesystem if omitted, which then
+        # shows as drift against this manifest. Set it explicitly to match.
+        volumeMode: Filesystem
         # k3s default: local-path-provisioner. Pin'd to a single node — fine
         # for this single-node cluster; revisit before scaling out.
         resources:
