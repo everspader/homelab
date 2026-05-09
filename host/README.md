@@ -15,8 +15,14 @@ This directory is in the repo for diff history and rebuild reproducibility, **no
 | Repo path | Symlinked from | Reload command |
 | --- | --- | --- |
 | `host/k3s/config.yaml` | `/etc/rancher/k3s/config.yaml` | `sudo systemctl restart k3s` |
-| `host/postgres/conf.d/00-homelab.conf` | `/etc/postgresql/17/main/conf.d/00-homelab.conf` | `sudo systemctl reload postgresql@17-main` |
+| `host/postgres/conf.d/00-homelab.conf` | `/etc/postgresql/17/main/conf.d/00-homelab.conf` | `sudo systemctl reload postgresql@17-main` (or restart for `archive_mode` changes) |
 | `host/postgres/pg_hba.conf` | `/etc/postgresql/17/main/pg_hba.conf` | `sudo systemctl reload postgresql@17-main` |
+
+### Reference-only (template, not symlinked)
+
+| Repo path | Real path on box | Why off-repo |
+| --- | --- | --- |
+| `host/postgres/pgbackrest.conf.example` | `/etc/pgbackrest/pgbackrest.conf` | Contains R2 access key + secret. The example is the structure with placeholders; the live file is hand-filled from 1Password. |
 
 ## Secrets
 

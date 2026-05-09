@@ -1,0 +1,55 @@
+# Example pgBackRest config — copy to /etc/pgbackrest/pgbackrest.conf on the
+# homelab box and fill in the placeholders. Secrets stay off-repo (1Password).
+#
+#   sudo install -d -o postgres -g postgres -m 0750 \
+#     /etc/pgbackrest /var/log/pgbackrest /var/lib/pgbackrest
+#   sudo cp /opt/homelab/host/postgres/pgbackrest.conf.example \
+#     /etc/pgbackrest/pgbackrest.conf
+#   sudoedit /etc/pgbackrest/pgbackrest.conf      # fill placeholders
+#   sudo chown postgres:postgres /etc/pgbackrest/pgbackrest.conf
+#   sudo chmod 0640 /etc/pgbackrest/pgbackrest.conf
+
+[global]
+repo1-type=s3
+
+# From Cloudflare R2 — use the endpoint host only (no scheme, no bucket).
+# Format: <account-id>.r2.cloudflarestorage.com
+repo1-s3-endpoint=<ACCOUNT_ID>.r2.cloudflarestorage.com
+repo1-s3-bucket=<BUCKET_NAME>
+repo1-s3-region=auto
+
+# R2 API token — generate at Cloudflare → R2 → Manage R2 API Tokens.
+# Permissions: Object Read & Write, scoped to the bucket above.
+repo1-s3-key=<ACCESS_KEY_ID>
+repo1-s3-key-secret=<SECRET_ACCESS_KEY>
+
+# R2 doesn't support virtual-hosted style for all operations; use path style.
+repo1-s3-uri-style=path
+
+# Path inside the bucket where backups + WAL live.
+repo1-path=/pgbackrest
+
+# Retention: 4 full + 8 differential. With weekly fulls + daily diffs that's
+# ~1 month of restorable history. Adjust to taste.
+repo1-retention-full=4
+repo1-retention-diff=8
+
+# Two parallel workers for backup/restore — fine on the 4-core G11.
+process-max=2
+
+# Logging
+log-level-console=info
+log-level-file=detail
+
+# Backup performance / footprint
+start-fast=y                          # checkpoint immediately on backup start
+compress-type=zst                     # better ratio + faster than gz at low CPU cost
+compress-level=3
+
+# --- Stanza: main ---
+# One stanza per Postgres cluster. We have one cluster (17-main).
+[main]
+pg1-path=/var/lib/postgresql/17/main
+pg1-port=5432
+pg1-user=postgres
+pg1-socket-path=/var/run/postgresql
