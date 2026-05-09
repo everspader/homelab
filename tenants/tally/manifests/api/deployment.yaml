@@ -57,6 +57,8 @@ spec:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             runAsNonRoot: true
+            runAsUser: 1000           # bun image's "bun" user; kubelet needs a numeric UID to enforce runAsNonRoot
+            runAsGroup: 1000
             capabilities:
               drop:
                 - ALL
