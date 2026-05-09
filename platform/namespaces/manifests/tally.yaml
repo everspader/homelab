@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tally
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: tally-quota
+  namespace: tally
+spec:
+  hard:
+    requests.cpu: "500m"
+    requests.memory: 512Mi
+    limits.cpu: "1"
+    limits.memory: 1Gi
