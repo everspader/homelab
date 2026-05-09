@@ -1,0 +1,51 @@
+# Drizzle migrations for the Tally API.
+# ArgoCD PreSync hook: runs BEFORE Deployment is touched on every sync.
+# If the migration fails, the rest of the sync aborts → old pods keep running
+# the old schema, new image never goes live until the migration is fixed.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  generateName: tally-api-migrate-       # fresh name per sync (Jobs are immutable)
+  namespace: tally
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 0                        # don't retry — fail loud
+  ttlSecondsAfterFinished: 300           # auto-cleanup completed pods after 5 min
+  template:
+    spec:
+      restartPolicy: Never
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: migrate
+          image: ghcr.io/everspader/tally-api:0.1.0   # bump in lockstep with Deployment
+          imagePullPolicy: IfNotPresent
+          command: ["bun", "run", "packages/db/src/migrate.ts"]
+          envFrom:
+            # Same Secret the API uses — single source of truth.
+            - secretRef:
+                name: tally-env
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
