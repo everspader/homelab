@@ -179,6 +179,18 @@ grafana:
     # Provision extra datasources as labeled ConfigMaps in manifests/.
     datasources:
       enabled: true
+      # Run the first sync as an initContainer so files exist BEFORE Grafana
+      # starts. Without this, the sidecar runs in parallel with Grafana, the
+      # sidecar wins the race only after Grafana's provisioning module has
+      # already completed on an empty directory, and the only re-trigger
+      # mechanism (the reload API) returns 401 because of the password
+      # mismatch from our earlier `grafana-cli reset-admin-password`. Net
+      # effect: zero datasources provisioned despite valid files on disk.
+      initDatasources: true
+      # Suppress the (always-401) reload API call. New ConfigMaps after
+      # startup require a manual `kubectl rollout restart` to pick up.
+      # Acceptable trade-off — datasource changes are rare.
+      skipReload: true
     resources:
       requests:
         cpu: 25m
