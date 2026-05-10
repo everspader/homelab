@@ -27,10 +27,15 @@ spec:
     - repoURL: https://github.com/everspader/homelab.git
       targetRevision: HEAD
       ref: values
-    # 4. Raw manifests under manifests/ — Vector DaemonSet (log shipper).
+    # 4. Raw manifests under manifests/ — Vector DaemonSet (log shipper),
+    #    LimitRange, sealed secrets, and dashboard ConfigMaps in
+    #    manifests/dashboards/. recurse: true is required for the
+    #    dashboards subdir; without it ArgoCD silently skips it.
     - repoURL: https://github.com/everspader/homelab.git
       targetRevision: HEAD
       path: platform/observability/manifests
+      directory:
+        recurse: true
   destination:
     server: https://kubernetes.default.svc
     namespace: observability
