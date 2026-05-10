@@ -240,7 +240,7 @@ grafana:
         - name: VictoriaLogs
           type: victoriametrics-logs-datasource
           access: proxy
-          url: http://victoria-logs-single-server.observability.svc.cluster.local:9428
+          url: http://observability-victoria-logs-single-server.observability.svc.cluster.local:9428
           isDefault: false
           editable: true
           jsonData:

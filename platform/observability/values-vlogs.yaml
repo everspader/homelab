@@ -1,6 +1,6 @@
 # victoria-logs-single values — log database for the homelab.
 # Vector (manifests/vector.yaml) ships pod logs into the JSON-line ingest
-# endpoint at http://victoria-logs-single-server:9428/insert/jsonline.
+# endpoint at http://observability-victoria-logs-single-server:9428/insert/jsonline.
 
 server:
   retentionPeriod: 14d   # match VMSingle's 15d-ish window

@@ -69,7 +69,7 @@ data:
       vlogs:
         type: http
         inputs: [vlogs_format]
-        uri: http://victoria-logs-single-server.observability.svc.cluster.local:9428/insert/jsonline?_msg_field=_msg&_time_field=_time&_stream_fields=stream,namespace,pod,container
+        uri: http://observability-victoria-logs-single-server.observability.svc.cluster.local:9428/insert/jsonline?_msg_field=_msg&_time_field=_time&_stream_fields=stream,namespace,pod,container
         encoding:
           codec: json
         framing:
