@@ -69,23 +69,6 @@ vmalert:
 alertmanager:
   enabled: false
 
-# ─── Default datasources override ────────────────────────────────────────────
-# The chart's stock defaultDatasources.victoriametrics.datasources renders
-# TWO entries: a prometheus-typed one and a "(DS)" one using the native
-# `victoriametrics-metrics-datasource` Grafana plugin. We don't install that
-# plugin (only the logs one), and Grafana 13 silently skips an entire
-# provisioning file if any entry references an unknown plugin type — so
-# both datasources end up unprovisioned, with no log line to indicate why.
-# Keep only the prometheus-typed one; VictoriaMetrics speaks PromQL natively
-# so every chart dashboard works through it.
-defaultDatasources:
-  victoriametrics:
-    datasources:
-      - name: VictoriaMetrics
-        type: prometheus
-        access: proxy
-        isDefault: true
-
 # ─── k3s-specific overrides ──────────────────────────────────────────────────
 # k3s bundles control-plane components (controller-manager, scheduler, etcd)
 # into a single binary, so they're not addressable as separate Services.
@@ -170,27 +153,15 @@ grafana:
   sidecar:
     dashboards:
       enabled: true
-    # Sidecar must be enabled — k8s-stack is 100% sidecar-driven for
-    # datasources. Disabling it stops the chart from rendering the
-    # VictoriaMetrics datasource ConfigMap entirely (gated by the
-    # `or (and grafana.enabled sidecar.datasources.enabled) forceDeployDatasource`
-    # check in templates/grafana/datasource.yaml). additionalDataSources
-    # also doesn't help — it's shadowed by the sidecar's emptyDir mount.
-    # Provision extra datasources as labeled ConfigMaps in manifests/.
+    # Datasources sidecar disabled. We've burned six commits on it without
+    # success: race conditions vs. Grafana's startup provisioning, the
+    # chart's auto-VM datasource ConfigMap shadowing additionalDataSources,
+    # initDatasources mode being flaky, and the reload API returning 401
+    # because of our earlier admin-password reset. Going fully static via
+    # `grafana.datasources` below — Secret mounted via subPath, guaranteed
+    # to be on disk before Grafana starts.
     datasources:
-      enabled: true
-      # Run the first sync as an initContainer so files exist BEFORE Grafana
-      # starts. Without this, the sidecar runs in parallel with Grafana, the
-      # sidecar wins the race only after Grafana's provisioning module has
-      # already completed on an empty directory, and the only re-trigger
-      # mechanism (the reload API) returns 401 because of the password
-      # mismatch from our earlier `grafana-cli reset-admin-password`. Net
-      # effect: zero datasources provisioned despite valid files on disk.
-      initDatasources: true
-      # Suppress the (always-401) reload API call. New ConfigMaps after
-      # startup require a manual `kubectl rollout restart` to pick up.
-      # Acceptable trade-off — datasource changes are rare.
-      skipReload: true
+      enabled: false
     resources:
       requests:
         cpu: 25m
@@ -201,7 +172,27 @@ grafana:
   # VictoriaLogs Grafana plugin (slug confirmed against grafana.com plugin API).
   plugins:
     - victoriametrics-logs-datasource
-  # No additionalDataSources here — see comment on sidecar.datasources above.
-  # VictoriaMetrics is auto-wired by the chart. VictoriaLogs is provisioned
-  # via manifests/grafana-ds-vlogs.yaml (labeled ConfigMap picked up by the
-  # sidecar at the same path as the chart's auto-generated one).
+  # Static datasource provisioning. The chart writes this map's keys as
+  # files into a Secret, then subPath-mounts each into
+  # /etc/grafana/provisioning/datasources/<filename> on the main container.
+  # Subpath bind mounts happen at pod start, before Grafana boots — no race.
+  datasources:
+    datasources.yaml:
+      apiVersion: 1
+      datasources:
+        - name: VictoriaMetrics
+          type: prometheus
+          access: proxy
+          url: http://vmsingle-observability-victoria-metrics-k8s-stack.observability.svc.cluster.local:8428
+          isDefault: true
+          editable: true
+          jsonData:
+            timeInterval: 30s
+        - name: VictoriaLogs
+          type: victoriametrics-logs-datasource
+          access: proxy
+          url: http://victoria-logs-single-server.observability.svc.cluster.local:9428
+          isDefault: false
+          editable: true
+          jsonData:
+            maxLines: 1000
