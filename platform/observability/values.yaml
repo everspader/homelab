@@ -16,6 +16,11 @@ global:
     dnsDomain: cluster.local
 
 # ─── VictoriaMetrics Operator ────────────────────────────────────────────────
+# Note on revisionHistoryLimit:
+# Each redeploy leaves a dead ReplicaSet behind (default keeps 10).
+# Where the subchart exposes the field directly we cap it at 3 (Grafana,
+# kube-state-metrics, node-exporter below). VM operator + VL chart
+# don't expose it; tolerable since they redeploy rarely.
 victoria-metrics-operator:
   enabled: true
   resources:
@@ -87,6 +92,7 @@ kubeEtcd:
 # ─── kube-state-metrics ──────────────────────────────────────────────────────
 kube-state-metrics:
   enabled: true
+  revisionHistoryLimit: 3
   resources:
     requests:
       cpu: 25m
@@ -98,6 +104,7 @@ kube-state-metrics:
 # ─── node-exporter (DaemonSet — one per node; single node here) ──────────────
 prometheus-node-exporter:
   enabled: true
+  revisionHistoryLimit: 3
   resources:
     requests:
       cpu: 25m
@@ -116,6 +123,7 @@ prometheus-node-exporter:
 # `admin.existingSecret` and seal the secret into manifests/.
 grafana:
   enabled: true
+  revisionHistoryLimit: 3
   defaultDashboardsTimezone: browser
   # Tell Grafana its public URL so login redirects, cookies, and CSRF
   # checks work behind the Cloudflare Tunnel. Without these, the page

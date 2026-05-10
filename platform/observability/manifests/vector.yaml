@@ -89,6 +89,7 @@ metadata:
   labels:
     app.kubernetes.io/name: vector
 spec:
+  revisionHistoryLimit: 3
   selector:
     matchLabels:
       app.kubernetes.io/name: vector
