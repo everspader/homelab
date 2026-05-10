@@ -261,12 +261,17 @@ grafana:
           type: postgres
           url: ep-falling-breeze-agyt76z7-pooler.c-2.eu-central-1.aws.neon.tech:5432
           user: grafana_ro
-          database: neondb
           isDefault: false
           editable: false
           secureJsonData:
             password: $NEON_ROOKIA_PASSWORD
           jsonData:
+            # `database` belongs in jsonData for Grafana 10+. The top-level
+            # `database` field still works for the connection, but the UI's
+            # "default database" check reads only from jsonData.database —
+            # mismatched values trigger "you do not currently have a default
+            # database configured" errors.
+            database: neondb
             sslmode: require
             postgresVersion: 1500 # Neon currently runs PG 15.x; bump to 1600 if upgraded
             timescaledb: false
