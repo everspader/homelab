@@ -140,9 +140,16 @@ grafana:
     enabled: false
   sidecar:
     dashboards:
+      # Sidecar still loads dashboard ConfigMaps from the chart (and any we
+      # add later), no conflict on that path.
       enabled: true
     datasources:
-      enabled: true
+      # DISABLED on purpose. When enabled, the sidecar mounts an emptyDir
+      # at /etc/grafana/provisioning/datasources/ that silently shadows the
+      # static additionalDataSources Secret — neither the chart's auto-wired
+      # VictoriaMetrics datasource nor our VictoriaLogs one ended up loaded.
+      # We provision both statically below for predictable behavior.
+      enabled: false
     resources:
       requests:
         cpu: 25m
@@ -153,9 +160,17 @@ grafana:
   # VictoriaLogs Grafana plugin (slug confirmed against grafana.com plugin API).
   plugins:
     - victoriametrics-logs-datasource
-  # The k8s-stack chart auto-wires VMSingle as the default datasource.
-  # We only need to add VictoriaLogs here.
+  # Static datasource provisioning — both VictoriaMetrics (for dashboards
+  # auto-wired by the chart) and VictoriaLogs (for log exploration). VM URL
+  # follows the operator's naming convention `vmsingle-<release>-<chart>`.
   additionalDataSources:
+    - name: VictoriaMetrics
+      type: prometheus
+      access: proxy
+      url: http://vmsingle-observability-victoria-metrics-k8s-stack:8429
+      isDefault: true
+      jsonData:
+        timeInterval: 30s
     - name: VictoriaLogs
       type: victoriametrics-logs-datasource
       access: proxy
