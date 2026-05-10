@@ -57,7 +57,7 @@ data:
           "gridPos": {"h": 4, "w": 4, "x": 8, "y": 0},
           "datasource": {"type": "postgres", "uid": "${datasource}"},
           "targets": [{"refId": "A", "format": "table", "rawSql": "SELECT pg_database_size(current_database()) AS value"}],
-          "fieldConfig": {"defaults": {"unit": "decbytes"}}
+          "fieldConfig": {"defaults": {"unit": "bytes"}}
         },
         {
           "id": 4, "type": "stat", "title": "Cache hit ratio",

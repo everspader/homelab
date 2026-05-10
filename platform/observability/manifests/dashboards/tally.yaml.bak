@@ -64,7 +64,7 @@ data:
           "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
           "datasource": {"type": "prometheus", "uid": "${datasource}"},
           "targets": [{"refId": "A", "legendFormat": "{{pod}}", "expr": "sum(container_memory_working_set_bytes{namespace=\"tally\",container!=\"\"}) by (pod)"}],
-          "fieldConfig": {"defaults": {"unit": "decbytes"}}
+          "fieldConfig": {"defaults": {"unit": "bytes"}}
         },
         {
           "id": 12, "type": "timeseries", "title": "Network per pod",

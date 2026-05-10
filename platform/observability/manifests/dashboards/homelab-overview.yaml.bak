@@ -123,7 +123,7 @@ data:
           "gridPos": {"h": 8, "w": 12, "x": 12, "y": 20},
           "datasource": {"type": "prometheus", "uid": "${datasource}"},
           "targets": [{"refId": "A", "legendFormat": "{{namespace}}", "expr": "sum(container_memory_working_set_bytes{namespace!=\"\",container!=\"\"}) by (namespace)"}],
-          "fieldConfig": {"defaults": {"unit": "decbytes"}}
+          "fieldConfig": {"defaults": {"unit": "bytes"}}
         },
         {
           "id": 30, "type": "table", "title": "Top 10 pods by CPU",
@@ -137,7 +137,7 @@ data:
           "gridPos": {"h": 9, "w": 12, "x": 12, "y": 28},
           "datasource": {"type": "prometheus", "uid": "${datasource}"},
           "targets": [{"refId": "A", "instant": true, "format": "table", "expr": "topk(10, sum(container_memory_working_set_bytes{container!=\"\",namespace!=\"\"}) by (namespace, pod))"}],
-          "fieldConfig": {"defaults": {"unit": "decbytes"}}
+          "fieldConfig": {"defaults": {"unit": "bytes"}}
         }
       ]
     }
