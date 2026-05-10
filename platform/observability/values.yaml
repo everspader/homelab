@@ -145,16 +145,28 @@ grafana:
       auth_url: https://github.com/login/oauth/authorize
       token_url: https://github.com/login/oauth/access_token
       api_url: https://api.github.com/user
-      # JMESPath against /user response: only `everspader` becomes
-      # GrafanaAdmin; anyone else resolves to "None" → access denied.
-      # Adjust the login or switch to team_ids if you ever invite others.
-      role_attribute_path: "login=='everspader' && 'GrafanaAdmin' || 'None'"
+      # JMESPath role map evaluated against the GitHub `/user` response:
+      #   - login == 'everspader'         → GrafanaAdmin (full admin)
+      #   - login in viewers list         → Viewer (read-only dashboards)
+      #   - anything else                 → 'None' → access denied
+      #
+      # Add friends by appending their GitHub login to the array, e.g.:
+      #   contains(['alice','bob','charlie'], login)
+      # No GitHub org needed — this is per-username allowlisting.
+      role_attribute_path: >-
+        login=='everspader' && 'GrafanaAdmin' ||
+        (contains([], login) && 'Viewer' || 'None')
       role_attribute_strict: true
-    # Keep basic auth ON as emergency admin fallback — if GitHub OAuth
-    # breaks (token revoked, GH OAuth app deleted, etc.) you can still
-    # log in with admin + the password from the Secret.
+    # Basic auth disabled — login is GitHub-only. The admin user still
+    # exists in the DB as a record, but the password form is gone and the
+    # /api/admin/* endpoints reject basic-auth attempts. Re-enable
+    # temporarily by flipping this to true if GitHub OAuth ever breaks.
     "auth.basic":
-      enabled: true
+      enabled: false
+    # Disable login form entirely (defense in depth — no obvious target
+    # for password brute-force / scanners).
+    "auth":
+      disable_login_form: true
     "auth.anonymous":
       enabled: false
   # GF_AUTH_GITHUB_CLIENT_ID + GF_AUTH_GITHUB_CLIENT_SECRET come from
