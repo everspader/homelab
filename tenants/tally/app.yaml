@@ -5,14 +5,27 @@ metadata:
   namespace: argocd
   finalizers:
     - resources-finalizer.argocd.argoproj.io
+  # argocd-image-updater config — see tenants/rookia/app.yaml for the
+  # detailed annotation breakdown. Mirrors that setup: semver strategy,
+  # strict X.Y.Z allow-tags regex, cross-namespace pull secret, GitHub App
+  # write-back into kustomization.yaml's `images:` block.
+  annotations:
+    argocd-image-updater.argoproj.io/image-list: tally=ghcr.io/everspader/tally-api
+    argocd-image-updater.argoproj.io/tally.update-strategy: semver
+    argocd-image-updater.argoproj.io/tally.allow-tags: 'regexp:^\d+\.\d+\.\d+$'
+    argocd-image-updater.argoproj.io/tally.pull-secret: pullsecret:tally/ghcr-pull
+    argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/github-app-homelab
+    argocd-image-updater.argoproj.io/git-branch: main
+    argocd-image-updater.argoproj.io/write-back-target: kustomization
 spec:
   project: default
   source:
     repoURL: https://github.com/everspader/homelab.git
     targetRevision: HEAD
     path: tenants/tally/manifests
-    directory:
-      recurse: true
+    # Explicit Kustomize source type — see rookia/app.yaml for why we don't
+    # rely on auto-detect when migrating away from `directory.recurse`.
+    kustomize: {}
   destination:
     server: https://kubernetes.default.svc
     namespace: tally

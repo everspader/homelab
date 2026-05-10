@@ -5,7 +5,10 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  generateName: tally-api-migrate- # fresh name per sync (Jobs are immutable)
+  # Fixed name (not generateName) so this resource is valid Kustomize input.
+  # `hook-delete-policy: BeforeHookCreation` already deletes the previous Job
+  # before each Sync, so we don't need a unique-per-run name.
+  name: tally-api-migrate
   namespace: tally
   annotations:
     argocd.argoproj.io/hook: PreSync
@@ -20,7 +23,7 @@ spec:
         - name: ghcr-pull
       containers:
         - name: migrate
-          image: ghcr.io/everspader/tally-api:0.2.0 # bump in lockstep with Deployment
+          image: ghcr.io/everspader/tally-api:0.2.0 # tag overridden by ../kustomization.yaml `images:` (kept in lockstep with Deployment)
           imagePullPolicy: IfNotPresent
           command: ["bun", "run", "packages/db/src/migrate.ts"]
           envFrom:

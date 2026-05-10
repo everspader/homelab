@@ -25,7 +25,7 @@ spec:
         - name: ghcr-pull # SealedSecret in the same namespace
       containers:
         - name: api
-          image: ghcr.io/everspader/tally-api:0.2.0 # bump on each release
+          image: ghcr.io/everspader/tally-api:0.2.0 # tag overridden by ../kustomization.yaml `images:` (managed by argocd-image-updater)
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
