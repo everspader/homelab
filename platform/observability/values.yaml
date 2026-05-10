@@ -3,6 +3,18 @@
 # the separate victoria-logs-single Helm release (see values-vlogs.yaml)
 # and are shipped by the Vector DaemonSet in manifests/vector.yaml.
 
+# ─── Cluster-wide DNS suffix ────────────────────────────────────────────────
+# Override the chart's default `cluster.local.` (with trailing dot — the
+# canonical absolute-FQDN form) to plain `cluster.local`. The trailing dot
+# is valid DNS but Grafana 13's URL parser rejects URLs of the form
+# `http://host.svc.cluster.local.:8428` silently — no log line, no error,
+# the entire datasource provisioning file gets dropped. K3s uses
+# cluster.local without the dot, so this matches reality and unbreaks
+# Grafana datasource provisioning at the same time.
+global:
+  cluster:
+    dnsDomain: cluster.local
+
 # ─── VictoriaMetrics Operator ────────────────────────────────────────────────
 victoria-metrics-operator:
   enabled: true
