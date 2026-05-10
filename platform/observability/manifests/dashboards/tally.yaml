@@ -1,0 +1,87 @@
+# Tally tenant dashboard — API only (no worker, no in-cluster DB).
+# Same structure as the Rookia dashboard for consistency.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-tally
+  namespace: observability
+  labels:
+    grafana_dashboard: "1"
+data:
+  tally.json: |
+    {
+      "annotations": {"list": []},
+      "editable": false,
+      "graphTooltip": 1,
+      "schemaVersion": 39,
+      "tags": ["tenant", "tally"],
+      "title": "Tally",
+      "uid": "tenant-tally",
+      "version": 1,
+      "time": {"from": "now-6h", "to": "now"},
+      "refresh": "30s",
+      "templating": {
+        "list": [
+          {
+            "name": "datasource", "label": "Metrics", "type": "datasource",
+            "query": "prometheus",
+            "current": {"text": "VictoriaMetrics", "value": "VictoriaMetrics"}
+          },
+          {
+            "name": "logs_datasource", "label": "Logs", "type": "datasource",
+            "query": "victoriametrics-logs-datasource",
+            "current": {"text": "VictoriaLogs", "value": "VictoriaLogs"}
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1, "type": "stat", "title": "API replicas (ready / desired)",
+          "gridPos": {"h": 4, "w": 12, "x": 0, "y": 0},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "targets": [
+            {"refId": "A", "legendFormat": "ready", "expr": "kube_deployment_status_replicas_ready{namespace=\"tally\",deployment=\"api\"}"},
+            {"refId": "B", "legendFormat": "desired", "expr": "kube_deployment_spec_replicas{namespace=\"tally\",deployment=\"api\"}"}
+          ],
+          "fieldConfig": {"defaults": {"unit": "short"}}
+        },
+        {
+          "id": 2, "type": "stat", "title": "Restarts last 24h",
+          "gridPos": {"h": 4, "w": 12, "x": 12, "y": 0},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "targets": [{"refId": "A", "expr": "sum(increase(kube_pod_container_status_restarts_total{namespace=\"tally\"}[24h]))"}],
+          "fieldConfig": {"defaults": {"unit": "short", "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 1}, {"color": "red", "value": 5}]}}}
+        },
+        {
+          "id": 10, "type": "timeseries", "title": "CPU per pod",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "targets": [{"refId": "A", "legendFormat": "{{pod}}", "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"tally\",container!=\"\"}[5m])) by (pod)"}],
+          "fieldConfig": {"defaults": {"unit": "short"}}
+        },
+        {
+          "id": 11, "type": "timeseries", "title": "Memory per pod",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "targets": [{"refId": "A", "legendFormat": "{{pod}}", "expr": "sum(container_memory_working_set_bytes{namespace=\"tally\",container!=\"\"}) by (pod)"}],
+          "fieldConfig": {"defaults": {"unit": "bytes"}}
+        },
+        {
+          "id": 12, "type": "timeseries", "title": "Network per pod",
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 12},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "targets": [
+            {"refId": "A", "legendFormat": "rx {{pod}}", "expr": "sum(rate(container_network_receive_bytes_total{namespace=\"tally\"}[5m])) by (pod)"},
+            {"refId": "B", "legendFormat": "tx {{pod}}", "expr": "-sum(rate(container_network_transmit_bytes_total{namespace=\"tally\"}[5m])) by (pod)"}
+          ],
+          "fieldConfig": {"defaults": {"unit": "Bps"}}
+        },
+        {
+          "id": 20, "type": "logs", "title": "Logs — namespace=tally",
+          "gridPos": {"h": 14, "w": 24, "x": 0, "y": 20},
+          "datasource": {"type": "victoriametrics-logs-datasource", "uid": "${logs_datasource}"},
+          "targets": [{"refId": "A", "expr": "{namespace=\"tally\"}"}],
+          "options": {"showTime": true, "wrapLogMessage": true, "sortOrder": "Descending", "dedupStrategy": "none", "showLabels": false, "showCommonLabels": false}
+        }
+      ]
+    }
