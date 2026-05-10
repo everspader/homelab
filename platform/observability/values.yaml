@@ -57,6 +57,23 @@ vmalert:
 alertmanager:
   enabled: false
 
+# ─── Default datasources override ────────────────────────────────────────────
+# The chart's stock defaultDatasources.victoriametrics.datasources renders
+# TWO entries: a prometheus-typed one and a "(DS)" one using the native
+# `victoriametrics-metrics-datasource` Grafana plugin. We don't install that
+# plugin (only the logs one), and Grafana 13 silently skips an entire
+# provisioning file if any entry references an unknown plugin type — so
+# both datasources end up unprovisioned, with no log line to indicate why.
+# Keep only the prometheus-typed one; VictoriaMetrics speaks PromQL natively
+# so every chart dashboard works through it.
+defaultDatasources:
+  victoriametrics:
+    datasources:
+      - name: VictoriaMetrics
+        type: prometheus
+        access: proxy
+        isDefault: true
+
 # ─── k3s-specific overrides ──────────────────────────────────────────────────
 # k3s bundles control-plane components (controller-manager, scheduler, etcd)
 # into a single binary, so they're not addressable as separate Services.
