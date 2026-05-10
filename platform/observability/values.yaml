@@ -57,6 +57,21 @@ vmalert:
 alertmanager:
   enabled: false
 
+# ─── k3s-specific overrides ──────────────────────────────────────────────────
+# k3s bundles control-plane components (controller-manager, scheduler, etcd)
+# into a single binary, so they're not addressable as separate Services.
+# Leaving these enabled triggers two failures:
+#   (a) Service names exceed the 63-char DNS label limit
+#       ("observability-victoria-metrics-k8s-stack-kube-controller-manager")
+#   (b) Even if names fit, the scrapers find no endpoints.
+# kubeApiServer and kubelet still work — k3s exposes those normally.
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeEtcd:
+  enabled: false
+
 # ─── kube-state-metrics ──────────────────────────────────────────────────────
 kube-state-metrics:
   enabled: true
