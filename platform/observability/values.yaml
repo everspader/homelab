@@ -132,6 +132,35 @@ grafana:
     server:
       domain: grafana.spaderlabs.com
       root_url: "https://%(domain)s/"
+    # ─── GitHub OAuth ──────────────────────────────────────────────────
+    # Client ID + Secret come from envFromSecret below (sealed in
+    # manifests/grafana-github-oauth.sealedsecret.yaml). Restrict login
+    # to a single GitHub user — anyone else who happens to find the URL
+    # gets denied at OAuth time, no Grafana account is created.
+    "auth.github":
+      enabled: true
+      allow_sign_up: true
+      auto_login: false
+      scopes: "user:email,read:org"
+      auth_url: https://github.com/login/oauth/authorize
+      token_url: https://github.com/login/oauth/access_token
+      api_url: https://api.github.com/user
+      # JMESPath against /user response: only `everspader` becomes
+      # GrafanaAdmin; anyone else resolves to "None" → access denied.
+      # Adjust the login or switch to team_ids if you ever invite others.
+      role_attribute_path: "login=='everspader' && 'GrafanaAdmin' || 'None'"
+      role_attribute_strict: true
+    # Keep basic auth ON as emergency admin fallback — if GitHub OAuth
+    # breaks (token revoked, GH OAuth app deleted, etc.) you can still
+    # log in with admin + the password from the Secret.
+    "auth.basic":
+      enabled: true
+    "auth.anonymous":
+      enabled: false
+  # GF_AUTH_GITHUB_CLIENT_ID + GF_AUTH_GITHUB_CLIENT_SECRET come from
+  # the sealed secret. Grafana auto-binds env vars matching `GF_<SECTION>_<KEY>`
+  # to grafana.ini overrides — no further wiring needed.
+  envFromSecret: grafana-github-oauth
   service:
     type: ClusterIP
   # Recreate (not RollingUpdate) — local-path-provisioner is RWO, so a
