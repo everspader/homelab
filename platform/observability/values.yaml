@@ -1,0 +1,130 @@
+# victoria-metrics-k8s-stack values for the homelab.
+# Goal: lightweight metrics + Grafana on a single-node k3s. Logs come from
+# the separate victoria-logs-single Helm release (see values-vlogs.yaml)
+# and are shipped by the Vector DaemonSet in manifests/vector.yaml.
+
+# ─── VictoriaMetrics Operator ────────────────────────────────────────────────
+victoria-metrics-operator:
+  enabled: true
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+# ─── VMSingle (single-node TSDB; switch to VMCluster only on multi-node) ─────
+vmsingle:
+  enabled: true
+  spec:
+    retentionPeriod: "15d"
+    storage:
+      accessModes: [ReadWriteOnce]
+      resources:
+        requests:
+          storage: 5Gi
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+# ─── VMAgent (scrapes ServiceMonitors / VMServiceScrapes, ships to VMSingle) ─
+vmagent:
+  enabled: true
+  spec:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+
+# ─── Disabled to keep the stack minimal; add back when alerting is needed ────
+vmalert:
+  enabled: false
+alertmanager:
+  enabled: false
+
+# ─── kube-state-metrics ──────────────────────────────────────────────────────
+kube-state-metrics:
+  enabled: true
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+# ─── node-exporter (DaemonSet — one per node; single node here) ──────────────
+prometheus-node-exporter:
+  enabled: true
+  resources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 64Mi
+
+# ─── Grafana ─────────────────────────────────────────────────────────────────
+# Exposed via the shared Cloudflare Tunnel: in the CF dashboard, add a public
+# hostname grafana.spaderlabs.com → http://observability-grafana.observability.svc.cluster.local:80.
+# Admin password: chart auto-generates one. Retrieve with:
+#   kubectl -n observability get secret observability-grafana \
+#     -o jsonpath='{.data.admin-password}' | base64 -d
+# To switch to a SealedSecret-managed admin password later, set
+# `admin.existingSecret` and seal the secret into manifests/.
+grafana:
+  enabled: true
+  defaultDashboardsTimezone: browser
+  service:
+    type: ClusterIP
+  persistence:
+    enabled: true
+    size: 1Gi
+  resources:
+    requests:
+      cpu: 50m
+      memory: 100Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  initChownData:
+    resources:
+      requests:
+        cpu: 25m
+        memory: 32Mi
+      limits:
+        cpu: 100m
+        memory: 64Mi
+  sidecar:
+    dashboards:
+      enabled: true
+    datasources:
+      enabled: true
+    resources:
+      requests:
+        cpu: 25m
+        memory: 32Mi
+      limits:
+        cpu: 100m
+        memory: 64Mi
+  # VictoriaLogs Grafana plugin (slug confirmed against grafana.com plugin API).
+  plugins:
+    - victoriametrics-logs-datasource
+  # The k8s-stack chart auto-wires VMSingle as the default datasource.
+  # We only need to add VictoriaLogs here.
+  additionalDataSources:
+    - name: VictoriaLogs
+      type: victoriametrics-logs-datasource
+      access: proxy
+      url: http://victoria-logs-single-server.observability.svc.cluster.local:9428
+      isDefault: false
+      jsonData:
+        maxLines: 1000

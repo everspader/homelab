@@ -1,0 +1,46 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: observability
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  sources:
+    # 1. VictoriaMetrics k8s-stack — VM Operator, VMSingle, VMAgent, Grafana,
+    #    kube-state-metrics, node-exporter. Replaces kube-prometheus-stack.
+    - chart: victoria-metrics-k8s-stack
+      repoURL: https://victoriametrics.github.io/helm-charts
+      targetRevision: 0.77.0
+      helm:
+        valueFiles:
+          - $values/platform/observability/values.yaml
+    # 2. VictoriaLogs (separate chart — not bundled by k8s-stack).
+    - chart: victoria-logs-single
+      repoURL: https://victoriametrics.github.io/helm-charts
+      targetRevision: 0.12.4
+      helm:
+        valueFiles:
+          - $values/platform/observability/values-vlogs.yaml
+    # 3. This repo as $values for both charts above (no manifests applied from here).
+    - repoURL: https://github.com/everspader/homelab.git
+      targetRevision: HEAD
+      ref: values
+    # 4. Raw manifests under manifests/ — Vector DaemonSet (log shipper).
+    - repoURL: https://github.com/everspader/homelab.git
+      targetRevision: HEAD
+      path: platform/observability/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: true
+    syncOptions:
+      - ServerSideApply=true
+      - CreateNamespace=false   # namespace + quota live in platform/namespaces
+      # CRDs from victoria-metrics-operator may not exist on the first pass;
+      # selfHeal retries until VMSingle/VMAgent CRs apply cleanly.
+      - ApplyOutOfSyncOnly=true

@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: observability
+---
+# Generous bounds to avoid sync failures from chart-default surprises while
+# still capping growth. Tighten once the stack is stable for a few weeks.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: observability-quota
+  namespace: observability
+spec:
+  hard:
+    requests.cpu: "1500m"
+    requests.memory: 1536Mi
+    limits.cpu: "4"
+    limits.memory: 3Gi
