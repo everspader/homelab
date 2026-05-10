@@ -169,10 +169,15 @@ grafana:
       disable_login_form: true
     "auth.anonymous":
       enabled: false
-  # GF_AUTH_GITHUB_CLIENT_ID + GF_AUTH_GITHUB_CLIENT_SECRET come from
-  # the sealed secret. Grafana auto-binds env vars matching `GF_<SECTION>_<KEY>`
-  # to grafana.ini overrides — no further wiring needed.
+  # Multiple secrets injected as env. envFromSecret (singular, legacy) takes
+  # one; envFromSecrets (plural) takes a list, so we add the Neon password
+  # secret alongside the GitHub OAuth one.
+  # - grafana-github-oauth: GF_AUTH_GITHUB_CLIENT_ID + _CLIENT_SECRET
+  # - grafana-neon-rookia : NEON_ROOKIA_PASSWORD (referenced by the
+  #   datasource entry below as $NEON_ROOKIA_PASSWORD)
   envFromSecret: grafana-github-oauth
+  envFromSecrets:
+    - name: grafana-neon-rookia
   service:
     type: ClusterIP
   # Recreate (not RollingUpdate) — local-path-provisioner is RWO, so a
@@ -245,3 +250,26 @@ grafana:
           editable: true
           jsonData:
             maxLines: 1000
+        # ─── Rookia production Postgres (Neon) ─────────────────────────
+        # Read-only role recommended (grafana_ro) — Grafana datasources
+        # support arbitrary SQL, so anyone with dashboard access can run
+        # DELETE if you give it owner credentials. Password is injected
+        # from the sealed secret `grafana-neon-rookia` as the env var
+        # NEON_ROOKIA_PASSWORD; Grafana substitutes $VAR_NAME at runtime.
+        # FILL IN host/database/user before pushing — placeholders below.
+        - name: Rookia (Neon prod)
+          type: postgres
+          url: ep-falling-breeze-agyt76z7-pooler.c-2.eu-central-1.aws.neon.tech:5432
+          user: grafana_ro
+          database: neondb
+          isDefault: false
+          editable: false
+          secureJsonData:
+            password: $NEON_ROOKIA_PASSWORD
+          jsonData:
+            sslmode: require
+            postgresVersion: 1500 # Neon currently runs PG 15.x; bump to 1600 if upgraded
+            timescaledb: false
+            maxOpenConns: 5
+            maxIdleConns: 2
+            connMaxLifetime: 14400
