@@ -105,6 +105,13 @@ prometheus-node-exporter:
 grafana:
   enabled: true
   defaultDashboardsTimezone: browser
+  # Tell Grafana its public URL so login redirects, cookies, and CSRF
+  # checks work behind the Cloudflare Tunnel. Without these, the page
+  # may load but logins / API calls fail in confusing ways.
+  "grafana.ini":
+    server:
+      domain: grafana.spaderlabs.com
+      root_url: "https://%(domain)s/"
   service:
     type: ClusterIP
   # Recreate (not RollingUpdate) — local-path-provisioner is RWO, so a
