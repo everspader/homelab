@@ -88,13 +88,15 @@ grafana:
   persistence:
     enabled: true
     size: 1Gi
+  # Grafana baseline is ~150–250Mi; plugin install at boot (the VL datasource
+  # below) briefly spikes higher, so the limit is set at 512Mi. OOMs at 256Mi.
   resources:
     requests:
       cpu: 50m
-      memory: 100Mi
+      memory: 192Mi
     limits:
-      cpu: 200m
-      memory: 256Mi
+      cpu: 250m
+      memory: 512Mi
   initChownData:
     resources:
       requests:
@@ -111,10 +113,10 @@ grafana:
     resources:
       requests:
         cpu: 25m
-        memory: 32Mi
+        memory: 48Mi
       limits:
         cpu: 100m
-        memory: 64Mi
+        memory: 128Mi
   # VictoriaLogs Grafana plugin (slug confirmed against grafana.com plugin API).
   plugins:
     - victoriametrics-logs-datasource
