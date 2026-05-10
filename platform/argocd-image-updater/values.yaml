@@ -1,0 +1,52 @@
+# Argo CD Image Updater — watches GHCR for new Rookia tags, commits the bumped
+# tag back to this repo's kustomization.yaml, and lets ArgoCD do the rollout.
+#
+# Auth model:
+#   - Registry: per-Application annotation `pull-secret: pullsecret:rookia/ghcr-pull`.
+#     Cross-namespace Secret read is granted by manifests/rbac.yaml.
+#   - Git push: per-Application annotation `write-back-method: git:secret:argocd/github-app-homelab`.
+#     Reuses ArgoCD's GitHub App. The App needs `Contents: write` permission on the repo.
+
+config:
+  # Watch ArgoCD Application CRDs directly via the Kubernetes API. Simpler than
+  # the gRPC mode — no ArgoCD API token to provision, no in-cluster TLS dance.
+  applicationsAPIKind: "kubernetes"
+
+  # Used only when an Application opts into `write-back-method: argocd` (we don't),
+  # but the chart still wants the field set.
+  argocd:
+    grpcWeb: true
+    serverAddress: "argocd-server.argocd.svc"
+    insecure: false
+    plaintext: false
+
+  logLevel: info
+
+  # Commit author baked into every bump commit. Matches the convention in
+  # platform/argocd-image-updater/README assumptions: bot identity, no PII.
+  gitCommitUser: argocd-image-updater
+  gitCommitMail: argocd-image-updater@spaderlabs.com
+  gitCommitTemplate: |
+    chore({{ .AppName }}): bump image tag
+
+    {{ range .AppChanges -}}
+    - {{ .Image }}:{{ .OldTag }} -> {{ .NewTag }}
+    {{ end }}
+
+# Default poll is 2m. 5m is plenty for a homelab and keeps GHCR API calls modest.
+extraArgs:
+  - --interval
+  - 5m
+
+# Conservative — single-replica controller, minimal footprint. Bump if it
+# starts watching many Applications.
+resources:
+  requests:
+    cpu: 25m
+    memory: 64Mi
+  limits:
+    cpu: 100m
+    memory: 128Mi
+
+metrics:
+  enabled: false   # flip on once observability stack is wired to scrape

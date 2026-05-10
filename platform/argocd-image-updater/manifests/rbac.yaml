@@ -1,0 +1,67 @@
+# Cross-namespace Secret reads for the argocd-image-updater ServiceAccount.
+#
+# The chart deploys the SA `argocd-image-updater` in its own namespace and
+# already grants it the controller-internal RBAC it needs (read Application
+# CRDs in argocd ns, read its own ConfigMap, etc.). What's missing for our
+# auth model is read access to the *existing* Secrets we don't want to
+# duplicate:
+#
+#   1. rookia/ghcr-pull         — referenced via `pullsecret:rookia/ghcr-pull`
+#                                 in the rookia Application annotations, so
+#                                 the updater can list tags on private GHCR.
+#   2. argocd/github-app-homelab — referenced via `git:secret:argocd/...`,
+#                                 reused as git-push creds so we don't seal
+#                                 a second copy of the GitHub App key.
+#
+# resourceNames pins each Role to a single Secret — least-privilege, no
+# blanket Secret read on either namespace.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: argocd-image-updater-ghcr-pull-reader
+  namespace: rookia
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["ghcr-pull"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: argocd-image-updater-ghcr-pull-reader
+  namespace: rookia
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: argocd-image-updater-ghcr-pull-reader
+subjects:
+  - kind: ServiceAccount
+    name: argocd-image-updater
+    namespace: argocd-image-updater
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: argocd-image-updater-github-app-reader
+  namespace: argocd
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["github-app-homelab"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: argocd-image-updater-github-app-reader
+  namespace: argocd
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: argocd-image-updater-github-app-reader
+subjects:
+  - kind: ServiceAccount
+    name: argocd-image-updater
+    namespace: argocd-image-updater

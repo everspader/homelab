@@ -9,7 +9,10 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  generateName: rookia-api-migrate-
+  # Fixed name (not generateName) so this resource is valid Kustomize input.
+  # `hook-delete-policy: BeforeHookCreation` already deletes the previous Job
+  # before each Sync, so we don't need a unique-per-run name.
+  name: rookia-api-migrate
   namespace: rookia
   annotations:
     argocd.argoproj.io/hook: Sync
@@ -25,7 +28,7 @@ spec:
         - name: ghcr-pull
       containers:
         - name: migrate
-          image: ghcr.io/everspader/rookia-api:0.10.2 # bump in lockstep with the api Deployment
+          image: ghcr.io/everspader/rookia-api:0.10.2 # tag overridden by ../kustomization.yaml `images:` (kept in lockstep with api/worker)
           imagePullPolicy: IfNotPresent
           # Image's WORKDIR is /app/apps/api; the api package.json's "db:migrate"
           # script runs packages/core/src/db/migrate.ts against the bundled

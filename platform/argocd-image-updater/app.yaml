@@ -1,0 +1,37 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argocd-image-updater
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  sources:
+    # 1. Helm chart — values from $values (source #2).
+    - chart: argocd-image-updater
+      repoURL: https://argoproj.github.io/argo-helm
+      targetRevision: 0.13.4
+      helm:
+        valueFiles:
+          - $values/platform/argocd-image-updater/values.yaml
+    # 2. This repo as $values for the chart (no manifests applied from here).
+    - repoURL: https://github.com/everspader/homelab.git
+      targetRevision: HEAD
+      ref: values
+    # 3. Raw manifests under manifests/ — cross-namespace RBAC so the updater
+    #    SA can read rookia/ghcr-pull (registry auth) + argocd/github-app-homelab
+    #    (git push creds) without re-sealing duplicates.
+    - repoURL: https://github.com/everspader/homelab.git
+      targetRevision: HEAD
+      path: platform/argocd-image-updater/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd-image-updater
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: true
+    syncOptions:
+      - ServerSideApply=true
+      - CreateNamespace=true   # platform infra ns; no ResourceQuota (mirrors cloudflared)
