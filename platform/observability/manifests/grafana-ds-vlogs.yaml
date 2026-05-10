@@ -1,0 +1,26 @@
+# VictoriaLogs Grafana datasource — provisioned as a labeled ConfigMap
+# that the Grafana sidecar (grafana.sidecar.datasources) picks up and
+# writes to /etc/grafana/provisioning/datasources/. Sits alongside the
+# chart's auto-generated VictoriaMetrics datasource ConfigMap.
+#
+# Label `grafana_datasource: "1"` matches the chart's sidecar selector
+# (grafana.sidecar.datasources.label/labelValue defaults).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-ds-victorialogs
+  namespace: observability
+  labels:
+    grafana_datasource: "1"
+data:
+  victorialogs.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: VictoriaLogs
+        type: victoriametrics-logs-datasource
+        access: proxy
+        url: http://victoria-logs-single-server.observability.svc.cluster.local:9428
+        isDefault: false
+        editable: true
+        jsonData:
+          maxLines: 1000

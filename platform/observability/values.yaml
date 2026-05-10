@@ -140,16 +140,16 @@ grafana:
     enabled: false
   sidecar:
     dashboards:
-      # Sidecar still loads dashboard ConfigMaps from the chart (and any we
-      # add later), no conflict on that path.
       enabled: true
+    # Sidecar must be enabled — k8s-stack is 100% sidecar-driven for
+    # datasources. Disabling it stops the chart from rendering the
+    # VictoriaMetrics datasource ConfigMap entirely (gated by the
+    # `or (and grafana.enabled sidecar.datasources.enabled) forceDeployDatasource`
+    # check in templates/grafana/datasource.yaml). additionalDataSources
+    # also doesn't help — it's shadowed by the sidecar's emptyDir mount.
+    # Provision extra datasources as labeled ConfigMaps in manifests/.
     datasources:
-      # DISABLED on purpose. When enabled, the sidecar mounts an emptyDir
-      # at /etc/grafana/provisioning/datasources/ that silently shadows the
-      # static additionalDataSources Secret — neither the chart's auto-wired
-      # VictoriaMetrics datasource nor our VictoriaLogs one ended up loaded.
-      # We provision both statically below for predictable behavior.
-      enabled: false
+      enabled: true
     resources:
       requests:
         cpu: 25m
@@ -160,21 +160,7 @@ grafana:
   # VictoriaLogs Grafana plugin (slug confirmed against grafana.com plugin API).
   plugins:
     - victoriametrics-logs-datasource
-  # Static datasource provisioning — both VictoriaMetrics (for dashboards
-  # auto-wired by the chart) and VictoriaLogs (for log exploration). VM URL
-  # follows the operator's naming convention `vmsingle-<release>-<chart>`.
-  additionalDataSources:
-    - name: VictoriaMetrics
-      type: prometheus
-      access: proxy
-      url: http://vmsingle-observability-victoria-metrics-k8s-stack:8429
-      isDefault: true
-      jsonData:
-        timeInterval: 30s
-    - name: VictoriaLogs
-      type: victoriametrics-logs-datasource
-      access: proxy
-      url: http://victoria-logs-single-server.observability.svc.cluster.local:9428
-      isDefault: false
-      jsonData:
-        maxLines: 1000
+  # No additionalDataSources here — see comment on sidecar.datasources above.
+  # VictoriaMetrics is auto-wired by the chart. VictoriaLogs is provisioned
+  # via manifests/grafana-ds-vlogs.yaml (labeled ConfigMap picked up by the
+  # sidecar at the same path as the chart's auto-generated one).
