@@ -14,6 +14,7 @@ metadata:
 spec:
   # Two pods so rolling restarts don't drop the tunnel mid-upgrade.
   replicas: 2
+  revisionHistoryLimit: 3
   selector:
     matchLabels:
       app: cloudflared
