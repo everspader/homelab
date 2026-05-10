@@ -42,6 +42,11 @@ spec:
     # Add a new service (e.g. admin UI) by dropping its manifests under
     # manifests/<name>/ AND listing them in kustomization.yaml's resources.
     path: tenants/rookia/manifests
+    # Empty `kustomize:` block forces ArgoCD to treat the source as Kustomize
+    # explicitly. Without this, removing `directory.recurse` left ArgoCD in
+    # "directory" mode (auto-detect didn't kick in for the cached source),
+    # so it tried to apply kustomization.yaml as a Kustomization CR and failed.
+    kustomize: {}
   destination:
     server: https://kubernetes.default.svc
     namespace: rookia

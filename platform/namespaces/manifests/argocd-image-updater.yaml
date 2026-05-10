@@ -1,0 +1,7 @@
+# Namespace for the argocd-image-updater controller (platform infra, no quota).
+# Lives in the namespaces Application so namespace lifecycle is uniform across
+# the cluster rather than scattered across each component's CreateNamespace=true.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: argocd-image-updater

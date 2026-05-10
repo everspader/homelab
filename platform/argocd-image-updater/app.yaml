@@ -34,4 +34,4 @@ spec:
       prune: true
     syncOptions:
       - ServerSideApply=true
-      - CreateNamespace=true   # platform infra ns; no ResourceQuota (mirrors cloudflared)
+      - CreateNamespace=false  # namespace is owned by platform/namespaces

@@ -1,8 +1,0 @@
-# Namespace for the argocd-image-updater controller. Platform infra (no
-# tenant quota), so it lives here next to the Application's own manifests
-# rather than in platform/namespaces/ (which is reserved for tenants +
-# observability that carry a ResourceQuota).
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: argocd-image-updater
