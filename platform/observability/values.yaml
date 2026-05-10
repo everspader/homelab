@@ -97,14 +97,12 @@ grafana:
     limits:
       cpu: 250m
       memory: 512Mi
+  # Disabled — modern k8s sets volume ownership via the pod's fsGroup (472,
+  # the Grafana chart's default). The init-chown-data container is redundant
+  # and was failing with chown exit code 1 on the local-path PVC. With
+  # fsGroup, the kubelet handles ownership at mount time.
   initChownData:
-    resources:
-      requests:
-        cpu: 25m
-        memory: 32Mi
-      limits:
-        cpu: 100m
-        memory: 64Mi
+    enabled: false
   sidecar:
     dashboards:
       enabled: true

@@ -1,0 +1,25 @@
+# LimitRange supplies default requests/limits to any container in the
+# `observability` namespace that doesn't specify them. The ResourceQuota
+# requires every container to declare limits.cpu and limits.memory, but
+# operator-injected sidecars (e.g. vmagent's config-init / config-reloader,
+# any future webhook-injected containers) frequently arrive without them.
+# Without this LimitRange, pod creation is rejected with:
+#   "failed quota: must specify limits.cpu for: config-init,config-reloader"
+#
+# Defaults are intentionally tight — large enough for any small sidecar to
+# start, small enough that the cap stays meaningful. Containers that need
+# more should declare it explicitly in values.yaml.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: observability-defaults
+  namespace: observability
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: 200m
+        memory: 128Mi
+      defaultRequest:
+        cpu: 25m
+        memory: 32Mi
