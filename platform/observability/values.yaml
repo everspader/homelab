@@ -13,6 +13,13 @@ victoria-metrics-operator:
     limits:
       cpu: 100m
       memory: 128Mi
+  operator:
+    # Don't watch prometheus-operator CRDs (PodMonitor / ServiceMonitor /
+    # PrometheusRule / Probe). We don't have prometheus-operator installed,
+    # so the converter's informer cache hangs forever and the operator
+    # crashloops with: "failed to wait for podmonitor caches to sync".
+    # Use VM-native CRDs (VMServiceScrape, VMPodScrape, VMRule) instead.
+    disable_prometheus_converter: true
 
 # ─── VMSingle (single-node TSDB; switch to VMCluster only on multi-node) ─────
 vmsingle:
@@ -85,6 +92,12 @@ grafana:
   defaultDashboardsTimezone: browser
   service:
     type: ClusterIP
+  # Recreate (not RollingUpdate) — local-path-provisioner is RWO, so a
+  # rolling update would deadlock on the PVC AND double the memory budget
+  # while old + new pods coexist. Recreate accepts ~30s of Grafana downtime
+  # in exchange for a clean, predictable rollout.
+  deploymentStrategy:
+    type: Recreate
   persistence:
     enabled: true
     size: 1Gi
