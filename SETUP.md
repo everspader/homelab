@@ -7,7 +7,7 @@ Step-by-step plan to stand up a single-node k3s cluster on a GMKtec NucBox G11 a
 
 ## Status
 
-_Last updated: 2026-05-08._
+_Last updated: 2026-05-10._
 
 | Phase | Title | Status |
 | ----- | ----- | ------ |
@@ -26,6 +26,7 @@ _Last updated: 2026-05-08._
 | 12    | etcd backups (local + S3 offsite)            | ⏳ pending |
 | 13    | Adding a new tenant (template; not blocking) | – reference |
 | 14    | Tailscale for LAN-only services              | partial (host-side only) |
+| 15    | Observability (VictoriaMetrics + VictoriaLogs + Grafana) | ✅ done |
 
 ## Followups
 
@@ -1351,9 +1352,92 @@ Or use the operator's `Ingress` class.
 
 ---
 
+## Phase 15 — Observability (~2 hr if it goes smoothly, more if it doesn't)
+
+**Goal:** metrics + logs in one place, lightweight enough not to drain a 16GB single-node box, GitHub-SSO'd. Stack:
+
+- **VictoriaMetrics k8s-stack** (chart `victoria-metrics-k8s-stack`) — VM operator, VMSingle, vmagent, kube-state-metrics, node-exporter, Grafana. Replaces kube-prometheus-stack at ~5–10× less RAM.
+- **VictoriaLogs single** (chart `victoria-logs-single`) — log database. Lighter than Loki, simpler operationally.
+- **Vector** as a DaemonSet — tails every pod's stdout/stderr, ships to VictoriaLogs via the JSON-line ingest endpoint.
+- **Grafana with GitHub OAuth** — no admin password form, login via GitHub only with a JMESPath role allowlist.
+
+Everything lives under `platform/observability/` as a **single ArgoCD Application** with multiple sources (two Helm charts + values + raw manifests).
+
+### 15.1 Repo layout
+
+```
+platform/observability/
+  app.yaml                        # Application — multi-source: 2 charts + $values + manifests
+  values.yaml                     # victoria-metrics-k8s-stack values
+  values-vlogs.yaml               # victoria-logs-single values
+  manifests/
+    limitrange.yaml               # default container limits (operator sidecars need them)
+    vector.yaml                   # Vector DaemonSet + RBAC + ConfigMap
+    grafana-github-oauth.sealedsecret.yaml   # OAuth client id + secret
+platform/namespaces/manifests/observability.yaml   # Namespace + ResourceQuota
+```
+
+### 15.2 GitHub OAuth app for Grafana SSO
+
+1. https://github.com/settings/developers → **New OAuth App**.
+2. Homepage URL: `https://grafana.spaderlabs.com`. Authorization callback URL: `https://grafana.spaderlabs.com/login/github`.
+3. Generate client secret. Copy both values.
+
+### 15.3 Seal the OAuth credentials
+
+```bash
+kubectl create secret generic grafana-github-oauth -n observability \
+  --from-literal=GF_AUTH_GITHUB_CLIENT_ID='<paste>' \
+  --from-literal=GF_AUTH_GITHUB_CLIENT_SECRET='<paste>' \
+  --dry-run=client -o yaml \
+  | kubeseal --cert pub-cert.pem -o yaml \
+  > platform/observability/manifests/grafana-github-oauth.sealedsecret.yaml
+```
+
+Env-var-shaped keys are intentional — Grafana auto-binds `GF_AUTH_GITHUB_*` env vars to `[auth.github]` in `grafana.ini`, no extra wiring.
+
+### 15.4 Cloudflare hostname
+
+In Cloudflare dashboard → **Zero Trust → Tunnels → homelab → Public Hostnames** → add `grafana.spaderlabs.com` pointing at `http://observability-grafana.observability.svc.cluster.local:80`.
+
+**Don't put a Cloudflare Access policy in front** — Grafana's GitHub OAuth callback (`/login/github`) needs to traverse cleanly. Access protection here would block the OAuth handshake. Access control is enforced at Grafana itself via `role_attribute_path` (only your GH login → `GrafanaAdmin`, anyone else → denied).
+
+### 15.5 Sync
+
+The root Application picks up `platform/observability/app.yaml` automatically.
+
+### 15.6 Verify
+
+```bash
+# All pods Running
+kubectl -n observability get pods
+
+# Datasources provisioned at startup (subPath bind-mount, no race)
+kubectl -n observability logs deploy/observability-grafana -c grafana 2>&1 \
+  | grep "inserting datasource"
+# Expect: VictoriaMetrics + VictoriaLogs
+
+# Hit https://grafana.spaderlabs.com → "Sign in with GitHub"
+```
+
+After a few scrape cycles, **Dashboards → Browse → Kubernetes / Compute Resources / Cluster** populates.
+
+### 15.7 Adding friends as Viewers
+
+Edit `platform/observability/values.yaml`, append to the `contains([], login)` array:
+
+```yaml
+role_attribute_path: >-
+  login=='everspader' && 'GrafanaAdmin' ||
+  (contains(['alice','bob'], login) && 'Viewer' || 'None')
+```
+
+Push → ArgoCD syncs → Grafana redeploys → they sign in via GitHub, get read-only.
+
+---
+
 ## Optional follow-ups (not blocking)
 
-- **Observability:** VictoriaMetrics + Grafana + Loki + Promtail. Single platform deployment, scrapes all tenants.
 - **Uptime Kuma** in `platform/uptime-kuma/` monitoring all tenants' public hostnames.
 - **Renovate** or **Dependabot** on the `homelab` repo for image tag bumps.
 - **Small UPS** (CyberPower CP900AVR or APC BE600) — NucBox idle ~10-15W, load ~30-40W. Half-decent UPS gives 30-60 min runtime, plenty for clean shutdown on power blips.
@@ -1379,3 +1463,14 @@ Or use the operator's `Ingress` class.
 - **Don't put `PreSync` hooks in an Application that owns its own SealedSecrets.** PreSync runs *before* the Sync phase that applies the secrets, so the hook pod can't pull its image (no `imagePullSecret` yet) or read its env (no `envFrom` Secret yet). Use a `Sync` hook with explicit sync-waves instead — secrets land at wave 0, the hook runs at wave 5, app Deployments roll at wave 10. The 3-app pattern (separate "shared" Application for secrets + per-service apps) hides this trap because the secret-bearing app syncs first; the moment you consolidate, it surfaces.
 - **Splitting one tenant into multiple ArgoCD Applications is over-engineering at solo / homelab scale.** "Independent rollback" is a team-scale feature, not a one-person feature; runtime decoupling (e.g. api availability vs worker availability) comes from separate Deployments, not separate Applications. Default to one Application per tenant with services as `manifests/<service>/` subdirs. Re-split only when a service has a genuinely different release cadence or owner.
 - **Stripping ArgoCD Application finalizers + deleting Apps does not always orphan resources cleanly.** During a refactor that swaps Applications, the old Apps' cascade-delete can race the new App's create, leaving the cluster temporarily without secrets/Deployments. Apply critical Secrets manually (`kubectl apply -f`) immediately after the swap to bridge the gap, then let ArgoCD adopt them.
+
+### Observability-specific traps
+
+- **The VictoriaMetrics chart's `global.cluster.dnsDomain` defaults to `cluster.local.` (with a trailing dot — DNS-canonical absolute-FQDN form).** The dot propagates into every URL the chart generates, e.g. `http://vmsingle...svc.cluster.local.:8428`. **Grafana 13's URL parser rejects this form silently** — no log line, no error, the entire datasource provisioning file is dropped. UI shows zero datasources even though the file is on disk. K3s uses plain `cluster.local` — override `global.cluster.dnsDomain: cluster.local` in values.yaml. Burned half a day on this.
+- **The VM operator's prometheus-converter watches `PodMonitor` / `ServiceMonitor` CRDs by default.** Without prometheus-operator installed, those CRDs don't exist and the operator's informer cache hangs forever; pod crashloops with `failed to wait for podmonitor caches to sync`. Set `victoria-metrics-operator.operator.disable_prometheus_converter: true` and use VM-native CRDs (VMServiceScrape / VMPodScrape / VMRule). Re-enable once you actually want third-party charts' ServiceMonitor objects auto-converted.
+- **k3s bundles kube-controller-manager / kube-scheduler / etcd into one binary.** Leaving the chart's per-component scrapers enabled creates Services that find no endpoints — *and* the auto-generated controller-manager Service name comes out at 64 chars (one over the 63-char DNS label limit), blocking the sync entirely. Disable `kubeControllerManager / kubeScheduler / kubeEtcd` in values.yaml; keep `kubeApiServer` and `kubelet` (k3s exposes those).
+- **`ResourceQuota` requires every container to declare `limits.cpu` and `limits.memory`.** Operator-injected sidecars (vmagent's `config-init` and `config-reloader`) ship without explicit limits and get rejected at admission with `must specify limits.cpu for: config-init,config-reloader`. Pair every quota'd namespace with a `LimitRange` that supplies sensible defaults — see `platform/observability/manifests/limitrange.yaml`.
+- **Grafana persistence + `local-path-provisioner` (RWO) is incompatible with rolling updates.** Two pods can't share the PVC, so a `RollingUpdate` deadlocks at 1+1 replicas AND doubles the memory budget while both pods exist. Use `deploymentStrategy.type: Recreate` — accept ~30s of downtime in exchange for a predictable rollout. Or disable persistence entirely if everything important is config-as-code (datasources via values, dashboards as labeled ConfigMaps).
+- **Grafana datasource provisioning: prefer fully-static `grafana.datasources` over the sidecar-driven path.** The sidecar mode has a startup race — Grafana's provisioning module reads the directory once at boot, the sidecar's emptyDir is empty until the sidecar finishes writing, and the reload API that would re-trigger a scan requires admin auth (which mismatches if you ever ran `grafana-cli admin reset-admin-password`). The static path mounts the file via subPath bind directly into `/etc/grafana/provisioning/datasources/` — guaranteed to exist before Grafana boots, no race. Cost: no dynamic datasource updates, but you change those rarely.
+- **Default `revisionHistoryLimit` is 10.** Six redeploys leaves six dead ReplicaSets sitting around forever. Set `revisionHistoryLimit: 3` in values for every chart that exposes it (Grafana, kube-state-metrics, node-exporter), and on every raw Deployment / DaemonSet / StatefulSet you commit. ArgoCD chart already defaults to 3 — most others don't.
+- **Don't put Cloudflare Access in front of a service that does its own OAuth callback** (Grafana with GitHub OAuth in our case). The callback path (`/login/github`) needs to traverse cleanly, and Access intercepts every request. Either remove Access for that hostname (rely on the app's own auth) or add a path-specific bypass for the callback. Easiest at homelab scale: skip Access on Grafana, let `role_attribute_path` enforce who's allowed.
