@@ -1,0 +1,126 @@
+# Rookia DB (Neon Postgres) — schema-agnostic database health.
+#
+# Targets the `Rookia (Neon prod)` datasource defined in values.yaml.
+# All queries use only system catalog views (pg_stat_activity, pg_stat_database,
+# pg_stat_statements, pg_tables, pg_locks) — no app-specific tables required,
+# so this dashboard works as-is regardless of schema.
+#
+# When you want app-level panels (signups today, orders/min, etc.) extend
+# this dashboard with new panels referencing real Rookia tables. The
+# `Tables in DB` panel below is a helper to discover what's in there.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-rookia-db
+  namespace: observability
+  labels:
+    grafana_dashboard: "1"
+data:
+  rookia-db.json: |
+    {
+      "annotations": {"list": []},
+      "editable": false,
+      "graphTooltip": 1,
+      "schemaVersion": 39,
+      "tags": ["tenant", "rookia", "postgres", "neon"],
+      "title": "Rookia DB (Neon)",
+      "uid": "tenant-rookia-db",
+      "version": 1,
+      "time": {"from": "now-30m", "to": "now"},
+      "refresh": "30s",
+      "templating": {
+        "list": [
+          {
+            "name": "datasource", "label": "Postgres", "type": "datasource",
+            "query": "postgres",
+            "current": {"text": "Rookia (Neon prod)", "value": "Rookia (Neon prod)"}
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1, "type": "stat", "title": "Active connections",
+          "gridPos": {"h": 4, "w": 4, "x": 0, "y": 0},
+          "datasource": {"type": "postgres", "uid": "${datasource}"},
+          "targets": [{"refId": "A", "format": "table", "rawSql": "SELECT count(*) AS value FROM pg_stat_activity WHERE state = 'active'"}],
+          "fieldConfig": {"defaults": {"unit": "short", "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 50}, {"color": "red", "value": 100}]}}}
+        },
+        {
+          "id": 2, "type": "stat", "title": "Total connections",
+          "gridPos": {"h": 4, "w": 4, "x": 4, "y": 0},
+          "datasource": {"type": "postgres", "uid": "${datasource}"},
+          "targets": [{"refId": "A", "format": "table", "rawSql": "SELECT count(*) AS value FROM pg_stat_activity"}],
+          "fieldConfig": {"defaults": {"unit": "short"}}
+        },
+        {
+          "id": 3, "type": "stat", "title": "Database size",
+          "gridPos": {"h": 4, "w": 4, "x": 8, "y": 0},
+          "datasource": {"type": "postgres", "uid": "${datasource}"},
+          "targets": [{"refId": "A", "format": "table", "rawSql": "SELECT pg_database_size(current_database()) AS value"}],
+          "fieldConfig": {"defaults": {"unit": "bytes"}}
+        },
+        {
+          "id": 4, "type": "stat", "title": "Cache hit ratio",
+          "gridPos": {"h": 4, "w": 4, "x": 12, "y": 0},
+          "datasource": {"type": "postgres", "uid": "${datasource}"},
+          "targets": [{"refId": "A", "format": "table", "rawSql": "SELECT round((sum(blks_hit)::numeric / NULLIF(sum(blks_hit + blks_read), 0) * 100), 2) AS value FROM pg_stat_database WHERE datname = current_database()"}],
+          "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100, "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 90}, {"color": "green", "value": 99}]}}}
+        },
+        {
+          "id": 5, "type": "stat", "title": "Transactions committed (cumulative)",
+          "gridPos": {"h": 4, "w": 4, "x": 16, "y": 0},
+          "datasource": {"type": "postgres", "uid": "${datasource}"},
+          "targets": [{"refId": "A", "format": "table", "rawSql": "SELECT xact_commit AS value FROM pg_stat_database WHERE datname = current_database()"}],
+          "fieldConfig": {"defaults": {"unit": "short"}}
+        },
+        {
+          "id": 6, "type": "stat", "title": "Deadlocks (cumulative)",
+          "gridPos": {"h": 4, "w": 4, "x": 20, "y": 0},
+          "datasource": {"type": "postgres", "uid": "${datasource}"},
+          "targets": [{"refId": "A", "format": "table", "rawSql": "SELECT deadlocks AS value FROM pg_stat_database WHERE datname = current_database()"}],
+          "fieldConfig": {"defaults": {"unit": "short", "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}}}
+        },
+        {
+          "id": 10, "type": "piechart", "title": "Connections by state",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+          "datasource": {"type": "postgres", "uid": "${datasource}"},
+          "targets": [{"refId": "A", "format": "table", "rawSql": "SELECT COALESCE(state, 'unknown') AS state, count(*) AS count FROM pg_stat_activity GROUP BY state ORDER BY count DESC"}],
+          "options": {"legend": {"displayMode": "table", "placement": "right", "values": ["value"]}, "pieType": "donut"}
+        },
+        {
+          "id": 11, "type": "timeseries", "title": "Tuples activity (cumulative — derive rate by panel options)",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+          "datasource": {"type": "postgres", "uid": "${datasource}"},
+          "targets": [
+            {"refId": "A", "format": "time_series", "rawSql": "SELECT now() AS time, tup_inserted AS \"inserts\", tup_updated AS \"updates\", tup_deleted AS \"deletes\", tup_returned AS \"reads\" FROM pg_stat_database WHERE datname = current_database()"}
+          ],
+          "fieldConfig": {"defaults": {"unit": "short", "custom": {"drawStyle": "line"}}}
+        },
+        {
+          "id": 20, "type": "table", "title": "Top 10 tables by total size",
+          "gridPos": {"h": 10, "w": 12, "x": 0, "y": 12},
+          "datasource": {"type": "postgres", "uid": "${datasource}"},
+          "targets": [{"refId": "A", "format": "table", "rawSql": "SELECT schemaname || '.' || tablename AS \"table\", pg_size_pretty(pg_total_relation_size(quote_ident(schemaname) || '.' || quote_ident(tablename))) AS \"total size\", pg_size_pretty(pg_relation_size(quote_ident(schemaname) || '.' || quote_ident(tablename))) AS \"data size\", pg_size_pretty(pg_indexes_size(quote_ident(schemaname) || '.' || quote_ident(tablename))) AS \"indexes size\" FROM pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema') ORDER BY pg_total_relation_size(quote_ident(schemaname) || '.' || quote_ident(tablename)) DESC LIMIT 10"}]
+        },
+        {
+          "id": 21, "type": "table", "title": "Top 10 slowest queries (pg_stat_statements)",
+          "gridPos": {"h": 10, "w": 12, "x": 12, "y": 12},
+          "datasource": {"type": "postgres", "uid": "${datasource}"},
+          "targets": [{"refId": "A", "format": "table", "rawSql": "SELECT calls, round(mean_exec_time::numeric, 2) AS \"mean ms\", round(total_exec_time::numeric / 1000, 2) AS \"total s\", left(query, 120) AS query FROM pg_stat_statements ORDER BY total_exec_time DESC LIMIT 10"}],
+          "description": "Requires the pg_stat_statements extension. Neon enables it by default. If panel errors with 'relation does not exist', run: CREATE EXTENSION IF NOT EXISTS pg_stat_statements;"
+        },
+        {
+          "id": 30, "type": "table", "title": "Long-running queries (>30s)",
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 22},
+          "datasource": {"type": "postgres", "uid": "${datasource}"},
+          "targets": [{"refId": "A", "format": "table", "rawSql": "SELECT pid, usename AS user, application_name, state, now() - query_start AS duration, left(query, 200) AS query FROM pg_stat_activity WHERE state != 'idle' AND query NOT ILIKE '%pg_stat_activity%' AND now() - query_start > interval '30 seconds' ORDER BY query_start ASC"}]
+        },
+        {
+          "id": 40, "type": "table", "title": "Tables in DB (helper for adding app panels)",
+          "gridPos": {"h": 10, "w": 24, "x": 0, "y": 30},
+          "datasource": {"type": "postgres", "uid": "${datasource}"},
+          "targets": [{"refId": "A", "format": "table", "rawSql": "SELECT schemaname AS schema, tablename AS \"table\", pg_size_pretty(pg_total_relation_size(quote_ident(schemaname) || '.' || quote_ident(tablename))) AS size, (SELECT n_live_tup FROM pg_stat_user_tables WHERE relname = tablename AND schemaname = pg_tables.schemaname) AS \"approx rows\" FROM pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema') ORDER BY schemaname, tablename"}],
+          "description": "Use this to discover what's available, then add panels with real queries against your own tables."
+        }
+      ]
+    }
