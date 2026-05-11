@@ -11,7 +11,12 @@ spec:
     # 1. Helm chart — values from $values (source #2).
     - chart: argocd-image-updater
       repoURL: https://argoproj.github.io/argo-helm
-      targetRevision: 1.1.5
+      # 0.x line — annotation-based controller (reads annotations on Argo CD
+      # Application CRs). The 1.x rewrite is a Kubebuilder operator that
+      # watches a new `ImageUpdater` CRD instead, which would require
+      # rewriting every tenant's wiring. Stay on the established 0.x model
+      # until 1.x stabilises and there's a documented migration path.
+      targetRevision: 0.14.0
       helm:
         valueFiles:
           - $values/platform/argocd-image-updater/values.yaml
