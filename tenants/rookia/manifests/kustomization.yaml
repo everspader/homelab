@@ -15,10 +15,6 @@ resources:
   - api/migrate-job.yaml
   # pg-boss worker (reuses the api image with a different command)
   - worker/deployment.yaml
-  # pg-boss Postgres
-  - pgboss/sealed-pgboss-pg-creds.yaml
-  - pgboss/service.yaml
-  - pgboss/statefulset.yaml
 # Single source of truth for the rookia-api image tag. Every container that
 # references `ghcr.io/everspader/rookia-api` (api Deployment, worker Deployment,
 # migrate Job) gets rewritten to `newTag` at build time.

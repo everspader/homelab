@@ -37,9 +37,9 @@ spec:
           envFrom:
             - secretRef:
                 name: rookia-env # shared with worker
-          # Sized so a RollingUpdate surge (old 750m + new 500m) fits the
-          # rookia-quota (limits.cpu=2) alongside worker (500m) and
-          # pgboss-pg (200m). Actual idle usage is ~15m / 165Mi.
+          # Sized so a RollingUpdate surge (old 500m + new 500m) fits the
+          # rookia-quota (limits.cpu=2) alongside the worker (500m).
+          # Actual idle usage is ~15m / 165Mi.
           resources:
             requests:
               cpu: 100m

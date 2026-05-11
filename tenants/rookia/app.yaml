@@ -61,15 +61,3 @@ spec:
     syncOptions:
       - ServerSideApply=true
       - CreateNamespace=false
-  # K8s populates apiVersion/kind/status on each VCT entry after the
-  # StatefulSet is created, but VCTs are immutable so ArgoCD can't reconcile
-  # the diff — leaving the StatefulSet stuck OutOfSync forever. Ignore those
-  # injected fields here. Only applies to StatefulSets in this Application
-  # (currently just pgboss-pg).
-  ignoreDifferences:
-    - group: apps
-      kind: StatefulSet
-      jqPathExpressions:
-        - .spec.volumeClaimTemplates[]?.apiVersion
-        - .spec.volumeClaimTemplates[]?.kind
-        - .spec.volumeClaimTemplates[]?.status
