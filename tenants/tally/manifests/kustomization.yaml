@@ -15,4 +15,4 @@ resources:
 # and the PreSync migrate Job pick up this tag, so they can never drift.
 images:
   - name: ghcr.io/everspader/tally-api
-    newTag: 0.3.1
+    newTag: 1.1.0
