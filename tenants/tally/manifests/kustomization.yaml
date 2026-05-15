@@ -21,4 +21,4 @@ images:
   - name: ghcr.io/everspader/tally-api
     newTag: 1.3.2
   - name: ghcr.io/everspader/tally-worker
-    newTag: 0.2.0
+    newTag: 0.3.0
