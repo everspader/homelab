@@ -9,11 +9,18 @@ metadata:
   # detailed annotation breakdown. Mirrors that setup: semver strategy,
   # strict X.Y.Z allow-tags regex, cross-namespace pull secret, GitHub App
   # write-back into kustomization.yaml's `images:` block.
+  #
+  # Two aliases (tally / tally-worker) because the api and worker are built
+  # and tagged independently in the tally repo (api@x.y.z / worker@x.y.z),
+  # so they bump on different cadences.
   annotations:
-    argocd-image-updater.argoproj.io/image-list: tally=ghcr.io/everspader/tally-api
+    argocd-image-updater.argoproj.io/image-list: tally=ghcr.io/everspader/tally-api,tally-worker=ghcr.io/everspader/tally-worker
     argocd-image-updater.argoproj.io/tally.update-strategy: semver
     argocd-image-updater.argoproj.io/tally.allow-tags: 'regexp:^\d+\.\d+\.\d+$'
     argocd-image-updater.argoproj.io/tally.pull-secret: pullsecret:tally/ghcr-pull
+    argocd-image-updater.argoproj.io/tally-worker.update-strategy: semver
+    argocd-image-updater.argoproj.io/tally-worker.allow-tags: 'regexp:^\d+\.\d+\.\d+$'
+    argocd-image-updater.argoproj.io/tally-worker.pull-secret: pullsecret:tally/ghcr-pull
     argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/github-app-homelab
     argocd-image-updater.argoproj.io/git-branch: main
     argocd-image-updater.argoproj.io/write-back-target: kustomization

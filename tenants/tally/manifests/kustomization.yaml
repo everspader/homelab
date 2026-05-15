@@ -1,9 +1,10 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 # Kustomize source for the tally ArgoCD Application. Replaces the previous
-# `directory.recurse: true` so the tally-api image tag is centralised in the
-# `images:` block below — that block is what argocd-image-updater rewrites
-# whenever a new GHCR tag matches the rookia-style semver allow-tags regex.
+# `directory.recurse: true` so the tally-api / tally-worker image tags are
+# centralised in the `images:` block below — that block is what
+# argocd-image-updater rewrites whenever a new GHCR tag matches the
+# semver allow-tags regex (see tenants/tally/app.yaml).
 namespace: tally
 resources:
   - sealed-env.yaml
@@ -11,8 +12,13 @@ resources:
   - api/deployment.yaml
   - api/service.yaml
   - api/job.yaml
-# Single source of truth for the tally-api image tag. Both the api Deployment
-# and the PreSync migrate Job pick up this tag, so they can never drift.
+  - worker/deployment.yaml
+# Single source of truth for tally image tags. The api Deployment and the
+# PreSync migrate Job both reference `tally-api`; the worker Deployment
+# references `tally-worker`. Each image is built+published independently by
+# the tally release workflow (api@x.y.z / worker@x.y.z tags).
 images:
   - name: ghcr.io/everspader/tally-api
     newTag: 1.3.2
+  - name: ghcr.io/everspader/tally-worker
+    newTag: 0.2.0

@@ -8,9 +8,13 @@ kind: ResourceQuota
 metadata:
   name: tally-quota
   namespace: tally
+# Sized to fit api + worker with a RollingUpdate surge on either:
+#   worst case = 2x api (1000m / 512Mi limits) + 1x worker (500m / 256Mi
+#   limits) = 1500m / 768Mi limits. Headroom left for the PreSync migrate
+#   Job (250m / 256Mi limits) overlapping with the existing pods.
 spec:
   hard:
-    requests.cpu: "500m"
-    requests.memory: 512Mi
-    limits.cpu: "1"
-    limits.memory: 1Gi
+    requests.cpu: "1"
+    requests.memory: 1Gi
+    limits.cpu: "2"
+    limits.memory: 2Gi
