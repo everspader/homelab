@@ -19,6 +19,7 @@ This directory is in the repo for diff history and rebuild reproducibility, **no
 | `host/postgres/pg_hba.conf` | `/etc/postgresql/17/main/pg_hba.conf` | `sudo systemctl reload postgresql@17-main` |
 | `host/postgres/systemd/pgbackrest@.service` | `/etc/systemd/system/pgbackrest@.service` | `sudo systemctl daemon-reload` |
 | `host/postgres/systemd/pgbackrest@full.timer` | `/etc/systemd/system/pgbackrest@full.timer` | `sudo systemctl daemon-reload && sudo systemctl restart pgbackrest@full.timer` |
+| `host/hermes/systemd/hermes.service` | `/etc/systemd/system/hermes.service` | `sudo systemctl daemon-reload && sudo systemctl restart hermes` |
 
 ### Reference-only (template, not symlinked)
 
