@@ -30,4 +30,14 @@
 # then cd to wherever (must be hermes-readable) and run the binary
 # directly at /var/lib/hermes/.hermes/hermes-agent/venv/bin/hermes.
 cd /opt/homelab 2>/dev/null || cd /
-exec sudo -u hermes -H /var/lib/hermes/.hermes/hermes-agent/venv/bin/hermes "$@"
+
+# Preserve terminal-related env vars across the sudo boundary. Without
+# these, TUI libraries (Textual, Rich, prompt_toolkit, etc.) can't
+# reliably identify the terminal and end up issuing capability-query
+# escapes whose responses race with their own input-handling setup —
+# the response leaks into the input box as visible characters
+# (`]11;rgb:....` and similar OSC sequences).
+#
+# TERM is always preserved by sudo. The others below are not.
+exec sudo --preserve-env=COLORTERM,LANG,LC_ALL,LC_CTYPE,LC_TERMINAL,TERM_PROGRAM,TERM_PROGRAM_VERSION \
+  -u hermes -H /var/lib/hermes/.hermes/hermes-agent/venv/bin/hermes "$@"
