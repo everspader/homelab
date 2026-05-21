@@ -67,7 +67,7 @@ UMask=0077
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-ReadWritePaths=/var/lib/hermes
+ReadWritePaths=/var/lib/hermes /opt/homelab
 
 # Hide other processes from /proc. The agent can see its own pids
 # (ProcSubset=pid), but not what the rest of the host is doing.
