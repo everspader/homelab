@@ -30,9 +30,6 @@ spec:
     repoURL: https://github.com/everspader/homelab.git
     targetRevision: HEAD
     path: tenants/tally/manifests
-    # Explicit Kustomize source type — see rookia/app.yaml for why we don't
-    # rely on auto-detect when migrating away from `directory.recurse`.
-    kustomize: {}
   destination:
     server: https://kubernetes.default.svc
     namespace: tally
