@@ -31,19 +31,27 @@
 # directly at /var/lib/hermes/.hermes/hermes-agent/venv/bin/hermes.
 cd /opt/homelab 2>/dev/null || cd /
 
-# --use-pty: sudo allocates a fresh PTY for the child instead of just
-# attaching the child to the caller's existing TTY. Without this, the
-# Hermes TUI sees mid-handshake terminal state (the OSC capability-
-# query response races with input-handler setup, and the response
-# leaks into the input box as visible chars like `]11;rgb:...`).
-# With --use-pty, sudo proxies I/O between the user's TTY and the
-# child's fresh PTY, so the TUI starts on a clean PTY with predictable
-# initial state.
+# PTY allocation: Ubuntu 26.04 ships sudo-rs (the Rust rewrite) as the
+# default sudo, and sudo-rs deliberately omits --use-pty. We still need
+# a fresh PTY for the child — without one, the Hermes TUI's startup
+# escape handshake (OSC 11 background-color query, etc.) races with
+# whatever was buffered on the caller's TTY, and the terminal's response
+# leaks into the input box as visible chars (`]11;rgb:...`).
 #
-# --preserve-env: TUI libraries (Textual, Rich, prompt_toolkit) use
-# these to identify the terminal up front and skip ambiguous capability
-# queries when they know the terminal. TERM is always preserved by sudo;
-# the others below are not.
-exec sudo --use-pty \
-  --preserve-env=COLORTERM,LANG,LC_ALL,LC_CTYPE,LC_TERMINAL,TERM_PROGRAM,TERM_PROGRAM_VERSION \
-  -u hermes -H /var/lib/hermes/.hermes/hermes-agent/venv/bin/hermes "$@"
+# Workaround: wrap the sudo call in script(1) from util-linux. script
+# allocates a fresh PTY, runs the command inside it, and proxies I/O
+# between the user's terminal and the new PTY — same semantics as
+# sudo --use-pty, just as a separate tool.
+#
+#   -q  quiet (no "Script started/done" messages)
+#   -f  flush output after each write — required for live TUI redraws
+#   -c  command to run inside the PTY
+#   /dev/null  typescript output file (we don't want a transcript)
+#
+# Args are interpolated via printf %q so spaces, quotes, etc. in the
+# user's args survive the shell expansion script's -c uses.
+cmd=$(printf '%q ' \
+  sudo --preserve-env=COLORTERM,LANG,LC_ALL,LC_CTYPE,LC_TERMINAL,TERM_PROGRAM,TERM_PROGRAM_VERSION \
+  -u hermes -H \
+  /var/lib/hermes/.hermes/hermes-agent/venv/bin/hermes "$@")
+exec script -qfc "$cmd" /dev/null
