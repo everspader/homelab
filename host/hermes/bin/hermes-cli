@@ -11,4 +11,23 @@
 # discovery lands on /var/lib/hermes/.hermes/ — matching the systemd
 # unit's environment exactly. No drift between `systemctl restart hermes`
 # and `hermes config` from the shell.
+#
+# CWD switch (important): sudo preserves the *calling* user's CWD by
+# default. If `home` runs `hermes` from anywhere under /home/home/,
+# the hermes process starts with CWD=/home/home/something — but the
+# hermes user (deliberately) cannot read /home/home/ (mode 0750,
+# group home, hermes not in that group). Hermes' project-root
+# discovery (walking up looking for .git) then raises Permission
+# denied on its first stat() call.
+#
+# Fix: cd to /opt/homelab before exec'ing sudo. /opt/homelab is
+# world-traversable, the hermes user can read it, and it's the
+# homelab repo — the most useful default project context for an
+# agent meant to operate the homelab.
+#
+# To work in a different directory, drop into a hermes-user shell
+# first:    sudo -u hermes -H bash
+# then cd to wherever (must be hermes-readable) and run the binary
+# directly at /var/lib/hermes/.hermes/hermes-agent/venv/bin/hermes.
+cd /opt/homelab 2>/dev/null || cd /
 exec sudo -u hermes -H /var/lib/hermes/.hermes/hermes-agent/venv/bin/hermes "$@"
