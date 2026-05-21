@@ -20,6 +20,15 @@ This directory is in the repo for diff history and rebuild reproducibility, **no
 | `host/postgres/systemd/pgbackrest@.service` | `/etc/systemd/system/pgbackrest@.service` | `sudo systemctl daemon-reload` |
 | `host/postgres/systemd/pgbackrest@full.timer` | `/etc/systemd/system/pgbackrest@full.timer` | `sudo systemctl daemon-reload && sudo systemctl restart pgbackrest@full.timer` |
 | `host/hermes/systemd/hermes.service` | `/etc/systemd/system/hermes.service` | `sudo systemctl daemon-reload && sudo systemctl restart hermes` |
+| `host/hermes/bin/hermes-cli` | `/usr/local/bin/hermes` | (none — wrapper script; edits live as soon as they land in the repo) |
+
+### Installed (not symlinked) — strict perm requirements
+
+`sudo` rejects symlinks in `/etc/sudoers.d/` unless the target file is root-owned and 0440. Since the repo working tree is owned by `home`, sudoers fragments are **copied** rather than symlinked. After editing in the repo, re-run the install command on the box.
+
+| Repo path | Real path on box | Apply command (re-run after each edit) |
+| --- | --- | --- |
+| `host/hermes/sudoers.d/50-hermes-cli` | `/etc/sudoers.d/50-hermes-cli` | `sudo install -m 0440 -o root -g root /opt/homelab/host/hermes/sudoers.d/50-hermes-cli /etc/sudoers.d/50-hermes-cli && sudo visudo -cf /etc/sudoers.d/50-hermes-cli` |
 
 ### Reference-only (template, not symlinked)
 

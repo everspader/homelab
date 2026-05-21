@@ -1,0 +1,14 @@
+#!/bin/bash
+# Invoke the Hermes CLI as the hermes service user.
+#
+# The hermes binary lives in /var/lib/hermes/.hermes/hermes-agent/venv/bin/
+# and is owned by the hermes system user — the same user that runs
+# hermes.service. The `home` user (the human operator) is granted
+# password-less sudo for THIS BINARY ONLY via /etc/sudoers.d/50-hermes-cli.
+# See host/hermes/sudoers.d/50-hermes-cli for the rule.
+#
+# `sudo -H` sets HOME=/var/lib/hermes so Hermes' default HERMES_HOME
+# discovery lands on /var/lib/hermes/.hermes/ — matching the systemd
+# unit's environment exactly. No drift between `systemctl restart hermes`
+# and `hermes config` from the shell.
+exec sudo -u hermes -H /var/lib/hermes/.hermes/hermes-agent/venv/bin/hermes "$@"

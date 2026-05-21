@@ -1,0 +1,22 @@
+# Allow the `home` user (the human operator) to invoke the Hermes CLI
+# as the hermes service user without a password prompt.
+#
+# Scoped TIGHT on purpose:
+#   - Only the `hermes` binary (NOT hermes-acp, NOT hermes-agent — add
+#     those here only if a real need surfaces).
+#   - Only as user `hermes` (NOT root, NOT any other user).
+#   - Absolute path so PATH manipulation can't substitute a different
+#     binary.
+#
+# This file canNOT be symlinked from the repo: sudoers.d entries are
+# rejected by sudo's safety checks unless they're owned root:root and
+# mode 0440 on the real on-disk file. Install (not symlink) via:
+#
+#   sudo install -m 0440 -o root -g root \
+#     /opt/homelab/host/hermes/sudoers.d/50-hermes-cli \
+#     /etc/sudoers.d/50-hermes-cli
+#   sudo visudo -cf /etc/sudoers.d/50-hermes-cli   # validate before next sudo invocation
+#
+# Re-run the install command above after every edit to this file in
+# the repo. There is no symlink, so `git pull` alone does not apply.
+home ALL=(hermes) NOPASSWD: /var/lib/hermes/.hermes/hermes-agent/venv/bin/hermes
