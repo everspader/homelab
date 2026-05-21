@@ -3,33 +3,39 @@ Description=Hermes personal assistant agent (gateway)
 Documentation=https://github.com/NousResearch/hermes-agent
 After=network-online.target
 Wants=network-online.target
-# Never give up on restarts — this is a personal assistant, always-on.
 StartLimitIntervalSec=0
 
 [Service]
 Type=simple
-User=home
-Group=home
-WorkingDirectory=/home/home/.hermes/hermes-agent
 
-# Env vars the Hermes installer's own unit sets — required for the venv
-# launcher + data dir discovery. HERMES_HOME points at the writable state
-# tree (sqlite dbs, sessions, skills, .env).
-Environment="PATH=/home/home/.hermes/hermes-agent/venv/bin:/home/home/.hermes/hermes-agent/node_modules/.bin:/home/home/.hermes/node/bin:/home/home/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-Environment="VIRTUAL_ENV=/home/home/.hermes/hermes-agent/venv"
-Environment="HERMES_HOME=/home/home/.hermes"
+# Dedicated system user — NOT the login user. The blast radius for an
+# agent that processes untrusted input (channels, web fetches, tool
+# results, prompt injection) is bounded to /var/lib/hermes/ plus
+# whatever capability we explicitly grant later. The agent has no
+# sudo, no SSH keys, no kubeconfig — these get added intentionally,
+# never inherited.
+User=hermes
+Group=hermes
+WorkingDirectory=/var/lib/hermes/.hermes/hermes-agent
 
-# `--replace` evicts any stale gateway holding /home/home/.hermes/gateway.lock,
-# which lets `systemctl restart` cut over cleanly.
-ExecStart=/home/home/.hermes/hermes-agent/venv/bin/python -m hermes_cli.main gateway run --replace
+# Env vars match what the Hermes installer's own user-level unit set.
+# HERMES_HOME points at the writable state tree (sqlite dbs, .env,
+# sessions, skills, memories). PATH must include the venv first so
+# `python` resolves to the hermes-agent interpreter, not the system one.
+Environment="PATH=/var/lib/hermes/.hermes/hermes-agent/venv/bin:/var/lib/hermes/.hermes/hermes-agent/node_modules/.bin:/var/lib/hermes/.hermes/node/bin:/var/lib/hermes/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="VIRTUAL_ENV=/var/lib/hermes/.hermes/hermes-agent/venv"
+Environment="HERMES_HOME=/var/lib/hermes/.hermes"
 
-# Hermes supports SIGUSR1 for live config reload (e.g. after editing
-# /home/home/.hermes/config.yaml) — `systemctl reload hermes` triggers this
-# without dropping in-flight gateway connections.
+# `--replace` evicts any stale gateway holding gateway.lock — lets
+# `systemctl restart` cut over without manual lock cleanup.
+ExecStart=/var/lib/hermes/.hermes/hermes-agent/venv/bin/python -m hermes_cli.main gateway run --replace
+
+# SIGUSR1 = live config reload. `systemctl reload hermes` after editing
+# /var/lib/hermes/.hermes/config.yaml on the box — no connection drop.
 ExecReload=/bin/kill -USR1 $MAINPID
 
-# Hermes loads /home/home/.hermes/.env itself — do NOT add EnvironmentFile=,
-# that would duplicate config and risk drift.
+# Hermes loads /var/lib/hermes/.hermes/.env itself — do NOT add
+# EnvironmentFile= here, would duplicate config and risk drift.
 
 Restart=always
 RestartSec=5
@@ -40,21 +46,44 @@ RestartForceExitStatus=75
 
 KillMode=mixed
 KillSignal=SIGTERM
-# Hermes drains gateway connections + flushes state.db on shutdown; the
-# installer's own unit uses 210s, so match it. Going lower risks SIGKILL
-# mid-flush and a corrupted state.db-wal.
+# Hermes drains gateway connections + checkpoints sqlite state.db on
+# shutdown. The installer's own unit uses 210s — match it. Going lower
+# risks SIGKILL mid-flush and a corrupted state.db-wal.
 TimeoutStopSec=210
 
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=hermes
 
-# Hardening — chosen NOT to break an agent that (a) needs the user's
-# tooling (kubectl, etc.) and (b) uses Linux namespaces/cgroups for its
-# own sandboxes/ feature. Tighten further once stable.
-#
-# NoNewPrivileges=true blocks sudo. If Hermes is later wired to run
-# privileged homelab ops via sudo, flip this to false.
+# Files the service creates default to 0600 — sensitive by default,
+# loosen per-file if needed.
+UMask=0077
+
+# ───────── Hardening ─────────
+# Filesystem confinement: the agent can only write to its own state dir.
+# /home is invisible (would otherwise expose /home/home/.ssh, kubeconfig,
+# shell history, etc.). /usr, /etc, /boot, /var/* are read-only via
+# ProtectSystem=strict.
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/hermes
+
+# Hide other processes from /proc. The agent can see its own pids
+# (ProcSubset=pid), but not what the rest of the host is doing.
+ProtectProc=invisible
+ProcSubset=pid
+
+# Capability dropping — Python user-space agent needs none of these
+# (no raw sockets, no setuid, no chroot, no kernel module loading).
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+# Device access — closed. Hermes is headless on this box (no audio,
+# no camera). If it ever needs /dev/foo, allow it specifically.
+DevicePolicy=closed
+
+# General kernel-surface hardening (safe defaults for any user-space agent).
 NoNewPrivileges=true
 RestrictSUIDSGID=true
 LockPersonality=true
@@ -62,11 +91,14 @@ ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectKernelLogs=true
 ProtectClock=true
+ProtectHostname=true
 RestrictRealtime=true
 SystemCallArchitectures=native
-# Deliberately NOT set: RestrictNamespaces, ProtectControlGroups,
-# ProtectSystem, ProtectHome, PrivateTmp — would likely break sandboxes/
-# or filesystem access the agent needs.
+
+# Deliberately NOT setting: RestrictNamespaces, ProtectControlGroups —
+# would likely break Hermes' sandboxes/ feature (uses Linux namespaces +
+# cgroups to isolate tool execution from itself). Tighten later if you
+# confirm sandboxes/ doesn't depend on them.
 
 [Install]
 WantedBy=multi-user.target
