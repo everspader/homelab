@@ -31,13 +31,19 @@
 # directly at /var/lib/hermes/.hermes/hermes-agent/venv/bin/hermes.
 cd /opt/homelab 2>/dev/null || cd /
 
-# Preserve terminal-related env vars across the sudo boundary. Without
-# these, TUI libraries (Textual, Rich, prompt_toolkit, etc.) can't
-# reliably identify the terminal and end up issuing capability-query
-# escapes whose responses race with their own input-handling setup —
-# the response leaks into the input box as visible characters
-# (`]11;rgb:....` and similar OSC sequences).
+# --use-pty: sudo allocates a fresh PTY for the child instead of just
+# attaching the child to the caller's existing TTY. Without this, the
+# Hermes TUI sees mid-handshake terminal state (the OSC capability-
+# query response races with input-handler setup, and the response
+# leaks into the input box as visible chars like `]11;rgb:...`).
+# With --use-pty, sudo proxies I/O between the user's TTY and the
+# child's fresh PTY, so the TUI starts on a clean PTY with predictable
+# initial state.
 #
-# TERM is always preserved by sudo. The others below are not.
-exec sudo --preserve-env=COLORTERM,LANG,LC_ALL,LC_CTYPE,LC_TERMINAL,TERM_PROGRAM,TERM_PROGRAM_VERSION \
+# --preserve-env: TUI libraries (Textual, Rich, prompt_toolkit) use
+# these to identify the terminal up front and skip ambiguous capability
+# queries when they know the terminal. TERM is always preserved by sudo;
+# the others below are not.
+exec sudo --use-pty \
+  --preserve-env=COLORTERM,LANG,LC_ALL,LC_CTYPE,LC_TERMINAL,TERM_PROGRAM,TERM_PROGRAM_VERSION \
   -u hermes -H /var/lib/hermes/.hermes/hermes-agent/venv/bin/hermes "$@"
