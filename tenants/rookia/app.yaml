@@ -8,7 +8,7 @@ metadata:
   # argocd-image-updater config. The updater watches GHCR for new tags
   # matching the regex below, then commits the bumped tag into
   # tenants/rookia/manifests/kustomization.yaml's `images:` block. ArgoCD
-  # then syncs the new tag into all three references (api, worker, migrate).
+  # then syncs the new tag into all three references (api, migrate).
   #
   #   image-list                : alias=image — `rookia` is the alias used in
   #                               every other annotation key below.

@@ -2,7 +2,7 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 # Kustomize source for the rookia ArgoCD Application. Replaces the previous
 # `directory.recurse: true` discovery so we get a single, declarative `images:`
-# block — both as a sanity check (api / worker / migrate-job can no longer
+# block — both as a sanity check (api / migrate-job can no longer
 # drift to different tags) and as the write-back target for argocd-image-updater.
 namespace: rookia
 resources:
@@ -13,10 +13,8 @@ resources:
   - api/deployment.yaml
   - api/service.yaml
   - api/migrate-job.yaml
-  # pg-boss worker (reuses the api image with a different command)
-  - worker/deployment.yaml
 # Single source of truth for the rookia-api image tag. Every container that
-# references `ghcr.io/everspader/rookia-api` (api Deployment, worker Deployment,
+# references `ghcr.io/everspader/rookia-api` (api Deployment,
 # migrate Job) gets rewritten to `newTag` at build time.
 #
 # argocd-image-updater is annotated to write back into THIS block — see
