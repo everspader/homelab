@@ -21,4 +21,4 @@ resources:
 # `tenants/rookia/app.yaml` for the update strategy + auth wiring.
 images:
   - name: ghcr.io/everspader/rookia-api
-    newTag: 0.10.20
+    newTag: 0.10.21
