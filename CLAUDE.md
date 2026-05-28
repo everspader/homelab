@@ -20,9 +20,11 @@ platform/           Cluster-wide infra. One subdir == one ArgoCD Application.
   cloudflared/      Shared Cloudflare Tunnel (Helm, SealedSecret tunnel token)
   namespaces/       Namespace + ResourceQuota per tenant
 tenants/            One subdir per logical app. Each has app.yaml + manifests/
-  rookia/           First tenant: apps/api + pg-boss worker (images on GHCR)
+  rookia/           First tenant: api Deployment (images on GHCR). External Supabase Postgres; async jobs via QStash — no in-cluster worker.
 host/               Host-level config NOT managed by ArgoCD — symlinked into the box's filesystem and reloaded manually. See host/README.md.
   k3s/config.yaml   → /etc/rancher/k3s/config.yaml on the homelab box
+  postgres/         → host Postgres (serves the tally tenant) + pgBackRest backups
+  hermes/           → "Adolf" agent: systemd unit, CLI wrapper, sudoers (see Hermes section)
 ```
 
 **Per-component layout convention** — each `platform/<component>/` and `tenants/<tenant>/` directory follows the same structure:
@@ -52,7 +54,24 @@ Each platform component is **self-managing** via Helm: the `app.yaml` points at 
 
 ## Images
 
-`tenants/rookia` pulls `ghcr.io/<user>/rookia-api:...` built by the Rookia monorepo's GitHub Actions (Phase 8). Only `linux/amd64` — the homelab is x86_64, no multi-arch needed. The worker reuses the API image with a different `command`.
+`tenants/rookia` pulls `ghcr.io/<user>/rookia-api:...` built by the Rookia monorepo's GitHub Actions (Phase 8). Only `linux/amd64` — the homelab is x86_64, no multi-arch needed. There is no separate worker — async work arrives as signed QStash (Upstash) HTTP webhooks to the api. The `rookia-api-migrate` Job runs the same image with `bun run db:migrate` ahead of rollout via Argo sync waves.
+
+## Hermes (Adolf) — host-level agent
+
+"Adolf" is a Hermes agent (`NousResearch/hermes-agent`) that operates the homelab and acts as a personal assistant over Telegram. NOT ArgoCD-managed — host-level, like `host/postgres`. Config tracked in `host/hermes/`:
+
+- `systemd/hermes.service` → `/etc/systemd/system/hermes.service` — system-scope unit, sandboxed (`ProtectSystem=strict`, dropped caps, etc.). The gateway runs as the dedicated `hermes` system user (uid 995, no sudo), **not** `home`.
+- `bin/hermes-cli` → `/usr/local/bin/hermes` — wrapper so `home` can run Adolf's CLI as the `hermes` user; it `cd /opt/homelab`s first (hermes can't read `/home/home`) and skips the OSC 11 query via `HERMES_TUI_THEME`.
+- `sudoers.d/50-hermes-cli` → `/etc/sudoers.d/50-hermes-cli` — **installed, not symlinked** (sudo rejects symlinked rules). See host/README.md.
+
+Runtime state (`.env`, `config.yaml`, sessions, skills, sqlite dbs) lives in `/var/lib/hermes/.hermes/` — outside the repo, owned `hermes:hermes` 0750. Apply path for the unit: edit in repo → `git pull` on box → `sudo systemctl daemon-reload && sudo systemctl restart hermes`. Live config reload (after editing `config.yaml` on the box): `sudo systemctl reload hermes` (SIGUSR1).
+
+Capabilities granted deliberately (each its own decision, not inherited):
+- **Repo write**: `/opt/homelab` via filesystem ACL (`setfacl -m u:hermes:rwX`) + Adolf's own GitHub deploy key. Commits as `Adolf <adolf@spaderlabs.com>`. The systemd unit lists `/opt/homelab` in `ReadWritePaths`.
+- **Cluster**: full kubectl cluster-admin via the world-readable (`0644`) k3s kubeconfig — same access `home` has. Trade-off: prompt-injection on Adolf = cluster-admin, including decrypting every SealedSecret. Accepted.
+- **Rookia DB**: read-only on Supabase via the `hermes_ro` role (BYPASSRLS, SELECT-only), exposed through the `rookia-db` MCP server (`postgres-mcp --access-mode=restricted`, launched by `/var/lib/hermes/.hermes/bin/rookia-mcp.sh`). Connection string is `ROOKIA_DB_URL` in `/var/lib/hermes/.hermes/.env`. New migration tables need a manual `GRANT SELECT` re-run (Supabase blocks `ALTER DEFAULT PRIVILEGES` for non-superusers).
+
+The bypass module (`patches/anthropic_billing_bypass.py` + venv `sitecustomize.py`) routes Anthropic calls through Claude Code OAuth. It lives in the venv — `hermes update` may wipe it; re-run the `hermes-claude-auth` installer if Adolf starts hitting "out of extra usage".
 
 ## Common commands
 
@@ -71,7 +90,7 @@ kubectl -n rookia logs -f deploy/api
 
 # SealedSecret workflow (run from repo root)
 kubeseal --fetch-cert > pub-cert.pem          # one-time per machine
-kubectl create secret generic api-env -n rookia \
+kubectl create secret generic rookia-env -n rookia \
   --from-env-file=.env --dry-run=client -o yaml \
   | kubeseal --cert pub-cert.pem -o yaml \
   > tenants/rookia/manifests/sealed-env.yaml
@@ -91,7 +110,7 @@ Standard flow to add or update a tenant's env:
      | kubeseal --cert pub-cert.pem -o yaml \
      > tenants/<tenant>/<scope>/manifests/sealed-env.yaml
    ```
-   `<scope>` is `manifests/` for flat tenants (e.g. tally) or `shared/manifests/` for split tenants where the SealedSecret is shared across multiple Applications (e.g. rookia/api + rookia/worker).
+   `<scope>` is `manifests/` — e.g. `tenants/rookia/manifests/sealed-env.yaml`, the `rookia-env` Secret consumed by both the api Deployment and the migrate Job.
 3. `git add && git commit && git push`. ArgoCD picks up the change on the next sync (near-instant via the GitHub webhook).
 4. Sealed Secrets controller decrypts the new manifest and overwrites the underlying `Secret`.
 5. **Pods do not auto-restart on Secret change.** Bounce the consumers: `kubectl rollout restart deploy/<name> -n <tenant>` (one per Deployment that uses the Secret).
@@ -111,7 +130,7 @@ Per global rules: never add `Co-Authored-By` trailers. Commits are the deploymen
 ## Critical traps (from SETUP.md — do not relearn the hard way)
 
 - The Sealed Secrets controller private key must be backed up offline. Without it, every `SealedSecret` in this repo is garbage on a fresh cluster.
-- pg-boss workers require `terminationGracePeriodSeconds: 60`. Without it, rolling restarts drop in-flight jobs.
+- QStash delivers async jobs as signed HTTP webhooks; the api verifies with `QSTASH_CURRENT_SIGNING_KEY` + `QSTASH_NEXT_SIGNING_KEY` (both required — `next` exists for zero-downtime key rotation).
 - `local-path-provisioner` PVCs are node-local. Single-node is fine; migrate to Longhorn/NFS before adding nodes.
 - MercadoPago retries webhooks for ~24h. Short downtime recoverable, 48h+ is not.
 - BIOS "Restore on AC Power Loss" must be on — otherwise a power blip = manual intervention.
