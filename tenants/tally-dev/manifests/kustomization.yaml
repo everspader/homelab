@@ -13,6 +13,6 @@ resources:
   - worker/deployment.yaml
 images:
   - name: ghcr.io/everspader/tally-api
-    newTag: 1.6.0
+    newTag: 1.7.0
   - name: ghcr.io/everspader/tally-worker
     newTag: 0.4.0
