@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: tally-dev
+  labels:
+    app: worker
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: worker
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: worker
+    spec:
+      # Worker spends most of its life sleeping (setTimeout until next 03:00 UTC
+      # run) but a SIGTERM mid-run should let materialize + prune finish.
+      terminationGracePeriodSeconds: 60
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: worker
+          image: ghcr.io/everspader/tally-worker:0.2.0 # tag overridden by ../kustomization.yaml `images:` (managed by argocd-image-updater)
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - secretRef:
+                name: tally-env # shared with api; worker only needs DATABASE_URL
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          # No HTTP probes — worker doesn't expose a port. K8s restarts on
+          # container exit; the bun process exits non-zero on missing DATABASE_URL
+          # or any unhandled error in runOnce().
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000 # bun image's "bun" user
+            runAsGroup: 1000
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

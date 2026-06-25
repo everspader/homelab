@@ -1,0 +1,40 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tally-dev
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  # Mirrors the prod `tally` Application's argocd-image-updater config (semver
+  # strategy, strict X.Y.Z allow-tags, cross-namespace pull secret, GitHub App
+  # write-back into this tenant's kustomization.yaml). Dev currently tracks the
+  # SAME released tags as prod — a separate-data sandbox on identical images.
+  # A pre-release tag stream (dev running unreleased code) is a planned follow-up.
+  annotations:
+    argocd-image-updater.argoproj.io/image-list: tally=ghcr.io/everspader/tally-api,tally-worker=ghcr.io/everspader/tally-worker
+    argocd-image-updater.argoproj.io/tally.update-strategy: semver
+    argocd-image-updater.argoproj.io/tally.allow-tags: 'regexp:^\d+\.\d+\.\d+$'
+    argocd-image-updater.argoproj.io/tally.pull-secret: pullsecret:tally-dev/ghcr-pull
+    argocd-image-updater.argoproj.io/tally-worker.update-strategy: semver
+    argocd-image-updater.argoproj.io/tally-worker.allow-tags: 'regexp:^\d+\.\d+\.\d+$'
+    argocd-image-updater.argoproj.io/tally-worker.pull-secret: pullsecret:tally-dev/ghcr-pull
+    argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/github-app-homelab
+    argocd-image-updater.argoproj.io/git-branch: main
+    argocd-image-updater.argoproj.io/write-back-target: kustomization
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/everspader/homelab.git
+    targetRevision: HEAD
+    path: tenants/tally-dev/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: tally-dev
+  syncPolicy:
+    automated:
+      selfHeal: true
+      # prune disabled: this tenant carries SealedSecrets; a renamed sealed
+      # file with prune on could delete the live Secret. Same caution as rookia.
+      prune: false
+    syncOptions:
+      - ServerSideApply=true
