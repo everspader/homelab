@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tally-dev
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: tally-dev-quota
+  namespace: tally-dev
+# Same sizing as the prod tally namespace: api + worker with a RollingUpdate
+# surge on either, plus headroom for the PreSync migrate Job.
+spec:
+  hard:
+    requests.cpu: "1"
+    requests.memory: 1Gi
+    limits.cpu: "2"
+    limits.memory: 2Gi
