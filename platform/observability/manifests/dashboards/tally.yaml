@@ -1,5 +1,15 @@
 # Tally tenant dashboard — API only (no worker, no in-cluster DB).
-# Same structure as the Rookia dashboard for consistency.
+#
+# Two data sources:
+#   - VictoriaMetrics (prometheus)      → infra: replicas, restarts, CPU/mem/net.
+#   - VictoriaLogs (logs datasource)    → request/error metrics derived from the
+#                                         API's structured JSON request log.
+#
+# The API emits one JSON line per request (packages/api/src/middleware/
+# request-log.ts): {msg:"req", method, route, status, class, dur_ms, err_code?}.
+# Vector ships the whole line as _msg; these panels `unpack_json` it at query
+# time and filter `msg:="req"` to isolate request lines from plain-text logs.
+# Route ids are collapsed to :id at the source, so `route` groups cleanly.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -17,7 +27,7 @@ data:
       "tags": ["tenant", "tally"],
       "title": "Tally",
       "uid": "tenant-tally",
-      "version": 1,
+      "version": 2,
       "time": {"from": "now-6h", "to": "now"},
       "refresh": "30s",
       "templating": {
@@ -37,7 +47,7 @@ data:
       "panels": [
         {
           "id": 1, "type": "stat", "title": "API replicas (ready / desired)",
-          "gridPos": {"h": 4, "w": 12, "x": 0, "y": 0},
+          "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
           "datasource": {"type": "prometheus", "uid": "${datasource}"},
           "targets": [
             {"refId": "A", "legendFormat": "ready", "expr": "kube_deployment_status_replicas_ready{namespace=\"tally\",deployment=\"api\"}"},
@@ -47,28 +57,72 @@ data:
         },
         {
           "id": 2, "type": "stat", "title": "Restarts last 24h",
-          "gridPos": {"h": 4, "w": 12, "x": 12, "y": 0},
+          "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
           "datasource": {"type": "prometheus", "uid": "${datasource}"},
           "targets": [{"refId": "A", "expr": "sum(increase(kube_pod_container_status_restarts_total{namespace=\"tally\"}[24h]))"}],
           "fieldConfig": {"defaults": {"unit": "short", "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 1}, {"color": "red", "value": 5}]}}}
         },
         {
-          "id": 10, "type": "timeseries", "title": "CPU per pod",
+          "id": 3, "type": "stat", "title": "5xx (selected range)",
+          "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+          "datasource": {"type": "victoriametrics-logs-datasource", "uid": "${logs_datasource}"},
+          "targets": [{"refId": "A", "queryType": "stats", "expr": "{namespace=\"tally\"} | unpack_json | filter msg:=\"req\" class:=\"5xx\" | stats count() errors"}],
+          "fieldConfig": {"defaults": {"unit": "short", "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 1}, {"color": "red", "value": 10}]}}}
+        },
+        {
+          "id": 4, "type": "stat", "title": "4xx (selected range)",
+          "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+          "datasource": {"type": "victoriametrics-logs-datasource", "uid": "${logs_datasource}"},
+          "targets": [{"refId": "A", "queryType": "stats", "expr": "{namespace=\"tally\"} | unpack_json | filter msg:=\"req\" class:=\"4xx\" | stats count() count"}],
+          "fieldConfig": {"defaults": {"unit": "short", "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}]}}}
+        },
+        {
+          "id": 10, "type": "timeseries", "title": "Requests by status class",
           "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+          "datasource": {"type": "victoriametrics-logs-datasource", "uid": "${logs_datasource}"},
+          "targets": [{"refId": "A", "queryType": "statsRange", "legendFormat": "{{class}}", "expr": "{namespace=\"tally\"} | unpack_json | filter msg:=\"req\" | stats by (class) count() reqs"}],
+          "fieldConfig": {"defaults": {"unit": "short", "custom": {"drawStyle": "bars", "stacking": {"mode": "normal"}, "fillOpacity": 60, "lineWidth": 0}}}
+        },
+        {
+          "id": 11, "type": "timeseries", "title": "Request latency (ms) — p50 / p95 / p99",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+          "datasource": {"type": "victoriametrics-logs-datasource", "uid": "${logs_datasource}"},
+          "targets": [{"refId": "A", "queryType": "statsRange", "expr": "{namespace=\"tally\"} | unpack_json | filter msg:=\"req\" | stats quantile(0.5, dur_ms) p50, quantile(0.95, dur_ms) p95, quantile(0.99, dur_ms) p99"}],
+          "fieldConfig": {"defaults": {"unit": "ms", "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 10}}}
+        },
+        {
+          "id": 20, "type": "table", "title": "Top failing routes (4xx / 5xx)",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+          "datasource": {"type": "victoriametrics-logs-datasource", "uid": "${logs_datasource}"},
+          "targets": [{"refId": "A", "queryType": "stats", "expr": "{namespace=\"tally\"} | unpack_json | filter msg:=\"req\" class:~\"[45]xx\" | stats by (method, route, status, err_code) count() hits | sort by (hits desc) | limit 25"}],
+          "options": {"showHeader": true},
+          "fieldConfig": {"defaults": {"unit": "short"}}
+        },
+        {
+          "id": 21, "type": "table", "title": "Error codes breakdown",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+          "datasource": {"type": "victoriametrics-logs-datasource", "uid": "${logs_datasource}"},
+          "targets": [{"refId": "A", "queryType": "stats", "expr": "{namespace=\"tally\"} | unpack_json | filter msg:=\"req\" err_code:* | stats by (err_code, status) count() hits | sort by (hits desc) | limit 25"}],
+          "options": {"showHeader": true},
+          "fieldConfig": {"defaults": {"unit": "short"}}
+        },
+        {
+          "id": 30, "type": "timeseries", "title": "CPU per pod",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 20},
           "datasource": {"type": "prometheus", "uid": "${datasource}"},
           "targets": [{"refId": "A", "legendFormat": "{{pod}}", "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"tally\",container!=\"\"}[5m])) by (pod)"}],
           "fieldConfig": {"defaults": {"unit": "short"}}
         },
         {
-          "id": 11, "type": "timeseries", "title": "Memory per pod",
-          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+          "id": 31, "type": "timeseries", "title": "Memory per pod",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 20},
           "datasource": {"type": "prometheus", "uid": "${datasource}"},
           "targets": [{"refId": "A", "legendFormat": "{{pod}}", "expr": "sum(container_memory_working_set_bytes{namespace=\"tally\",container!=\"\"}) by (pod)"}],
           "fieldConfig": {"defaults": {"unit": "decbytes"}}
         },
         {
-          "id": 12, "type": "timeseries", "title": "Network per pod",
-          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 12},
+          "id": 32, "type": "timeseries", "title": "Network per pod",
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 28},
           "datasource": {"type": "prometheus", "uid": "${datasource}"},
           "targets": [
             {"refId": "A", "legendFormat": "rx {{pod}}", "expr": "sum(rate(container_network_receive_bytes_total{namespace=\"tally\"}[5m])) by (pod)"},
@@ -77,8 +131,15 @@ data:
           "fieldConfig": {"defaults": {"unit": "Bps"}}
         },
         {
-          "id": 20, "type": "logs", "title": "Logs — namespace=tally",
-          "gridPos": {"h": 14, "w": 24, "x": 0, "y": 20},
+          "id": 40, "type": "logs", "title": "Server errors — stderr (5xx + stack traces)",
+          "gridPos": {"h": 10, "w": 24, "x": 0, "y": 36},
+          "datasource": {"type": "victoriametrics-logs-datasource", "uid": "${logs_datasource}"},
+          "targets": [{"refId": "A", "expr": "{namespace=\"tally\", stream=\"stderr\"}"}],
+          "options": {"showTime": true, "wrapLogMessage": true, "sortOrder": "Descending", "dedupStrategy": "none", "showLabels": false, "showCommonLabels": false}
+        },
+        {
+          "id": 41, "type": "logs", "title": "Logs — namespace=tally",
+          "gridPos": {"h": 14, "w": 24, "x": 0, "y": 46},
           "datasource": {"type": "victoriametrics-logs-datasource", "uid": "${logs_datasource}"},
           "targets": [{"refId": "A", "expr": "{namespace=\"tally\"}"}],
           "options": {"showTime": true, "wrapLogMessage": true, "sortOrder": "Descending", "dedupStrategy": "none", "showLabels": false, "showCommonLabels": false}
