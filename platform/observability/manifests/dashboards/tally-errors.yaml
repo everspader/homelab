@@ -355,6 +355,7 @@ data:
           "options": {
             "showTime": true,
             "wrapLogMessage": true,
+            "prettifyLogMessage": false,
             "sortOrder": "Descending",
             "dedupStrategy": "none",
             "showLabels": false,
@@ -384,6 +385,7 @@ data:
           "options": {
             "showTime": true,
             "wrapLogMessage": true,
+            "prettifyLogMessage": false,
             "sortOrder": "Descending",
             "dedupStrategy": "none",
             "showLabels": false,
