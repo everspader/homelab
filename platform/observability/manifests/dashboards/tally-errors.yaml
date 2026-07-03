@@ -5,12 +5,12 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: grafana-dashboard-tally
+  name: grafana-dashboard-tally-errors
   namespace: observability
   labels:
     grafana_dashboard: "1"
 data:
-  tally.json: |
+  tally-errors.json: |
     {
       "annotations": {
         "list": []
@@ -22,8 +22,8 @@ data:
         "tenant",
         "tally"
       ],
-      "title": "Tally / Overview",
-      "uid": "tenant-tally",
+      "title": "Tally / Errors",
+      "uid": "tenant-tally-errors",
       "version": 3,
       "time": {
         "from": "now-6h",
@@ -56,89 +56,11 @@ data:
       },
       "panels": [
         {
-          "id": 1,
-          "type": "stat",
-          "title": "API replicas (ready / desired)",
-          "gridPos": {
-            "x": 0,
-            "y": 0,
-            "w": 6,
-            "h": 4
-          },
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "targets": [
-            {
-              "refId": "A",
-              "legendFormat": "ready",
-              "expr": "kube_deployment_status_replicas_ready{namespace=\"tally\",deployment=\"api\"}"
-            },
-            {
-              "refId": "B",
-              "legendFormat": "desired",
-              "expr": "kube_deployment_spec_replicas{namespace=\"tally\",deployment=\"api\"}"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {
-              "unit": "short"
-            }
-          }
-        },
-        {
-          "id": 2,
-          "type": "stat",
-          "title": "Restarts last 24h",
-          "gridPos": {
-            "x": 6,
-            "y": 0,
-            "w": 6,
-            "h": 4
-          },
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "targets": [
-            {
-              "refId": "A",
-              "expr": "sum(increase(kube_pod_container_status_restarts_total{namespace=\"tally\"}[24h]))"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {
-              "unit": "short",
-              "color": {
-                "mode": "thresholds"
-              },
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": null
-                  },
-                  {
-                    "color": "yellow",
-                    "value": 1
-                  },
-                  {
-                    "color": "red",
-                    "value": 5
-                  }
-                ]
-              }
-            }
-          }
-        },
-        {
-          "id": 3,
+          "id": 201,
           "type": "stat",
           "title": "5xx (range)",
           "gridPos": {
-            "x": 12,
+            "x": 0,
             "y": 0,
             "w": 6,
             "h": 4
@@ -181,9 +103,83 @@ data:
           }
         },
         {
-          "id": 4,
+          "id": 202,
           "type": "stat",
-          "title": "Sweeps (last 2h)",
+          "title": "4xx (range)",
+          "gridPos": {
+            "x": 6,
+            "y": 0,
+            "w": 6,
+            "h": 4
+          },
+          "datasource": {
+            "type": "victoriametrics-logs-datasource",
+            "uid": "${logs_datasource}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "queryType": "stats",
+              "expr": "{namespace=\"tally\"} | unpack_json | filter msg:=\"req\" class:=\"4xx\" | stats count() c"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "fixed",
+                "fixedColor": "blue"
+              }
+            }
+          }
+        },
+        {
+          "id": 203,
+          "type": "stat",
+          "title": "401 unauthorized (range)",
+          "gridPos": {
+            "x": 12,
+            "y": 0,
+            "w": 6,
+            "h": 4
+          },
+          "datasource": {
+            "type": "victoriametrics-logs-datasource",
+            "uid": "${logs_datasource}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "queryType": "stats",
+              "expr": "{namespace=\"tally\"} | unpack_json | filter msg:=\"req\" status:=401 | stats count() c"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 1
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": 204,
+          "type": "stat",
+          "title": "404 not found (range)",
           "gridPos": {
             "x": 18,
             "y": 0,
@@ -198,36 +194,19 @@ data:
             {
               "refId": "A",
               "queryType": "stats",
-              "expr": "{namespace=\"tally\"} | unpack_json | filter msg:=\"event\" event:=\"sweep\" | stats count() sweeps"
+              "expr": "{namespace=\"tally\"} | unpack_json | filter msg:=\"req\" status:=404 | stats count() c"
             }
           ],
           "fieldConfig": {
             "defaults": {
-              "unit": "short",
-              "color": {
-                "mode": "thresholds"
-              },
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "red",
-                    "value": null
-                  },
-                  {
-                    "color": "green",
-                    "value": 1
-                  }
-                ]
-              }
+              "unit": "short"
             }
-          },
-          "timeFrom": "2h"
+          }
         },
         {
-          "id": 5,
+          "id": 205,
           "type": "timeseries",
-          "title": "Requests by status class",
+          "title": "4xx / 5xx over time",
           "gridPos": {
             "x": 0,
             "y": 4,
@@ -242,7 +221,7 @@ data:
             {
               "refId": "A",
               "queryType": "statsRange",
-              "expr": "{namespace=\"tally\"} | unpack_json | filter msg:=\"req\" | stats by (class) count() reqs",
+              "expr": "{namespace=\"tally\"} | unpack_json | filter msg:=\"req\" class:~\"[45]xx\" | stats by (class) count() reqs",
               "legendFormat": "{{class}}"
             }
           ],
@@ -261,9 +240,9 @@ data:
           }
         },
         {
-          "id": 6,
-          "type": "timeseries",
-          "title": "Request latency (ms) — p50 / p95 / p99",
+          "id": 206,
+          "type": "table",
+          "title": "Error codes breakdown",
           "gridPos": {
             "x": 12,
             "y": 4,
@@ -277,30 +256,58 @@ data:
           "targets": [
             {
               "refId": "A",
-              "queryType": "statsRange",
-              "expr": "{namespace=\"tally\"} | unpack_json | filter msg:=\"req\" | stats quantile(0.5, dur_ms) p50, quantile(0.95, dur_ms) p95, quantile(0.99, dur_ms) p99"
+              "queryType": "stats",
+              "expr": "{namespace=\"tally\"} | unpack_json | filter msg:=\"req\" err_code:* | stats by (err_code, status) count() hits | sort by (hits desc) | limit 25"
             }
           ],
+          "options": {
+            "showHeader": true
+          },
           "fieldConfig": {
             "defaults": {
-              "unit": "ms",
-              "custom": {
-                "drawStyle": "line",
-                "lineWidth": 1,
-                "fillOpacity": 10
-              }
+              "unit": "short"
             }
           }
         },
         {
-          "id": 7,
-          "type": "timeseries",
-          "title": "Sweep throughput (rules / txns / cc-payments)",
+          "id": 207,
+          "type": "table",
+          "title": "Top failing routes (4xx / 5xx)",
           "gridPos": {
             "x": 0,
             "y": 12,
             "w": 12,
-            "h": 7
+            "h": 8
+          },
+          "datasource": {
+            "type": "victoriametrics-logs-datasource",
+            "uid": "${logs_datasource}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "queryType": "stats",
+              "expr": "{namespace=\"tally\"} | unpack_json | filter msg:=\"req\" class:~\"[45]xx\" | stats by (method, route, status, err_code) count() hits | sort by (hits desc) | limit 25"
+            }
+          ],
+          "options": {
+            "showHeader": true
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            }
+          }
+        },
+        {
+          "id": 208,
+          "type": "timeseries",
+          "title": "401 by route",
+          "gridPos": {
+            "x": 12,
+            "y": 12,
+            "w": 12,
+            "h": 8
           },
           "datasource": {
             "type": "victoriametrics-logs-datasource",
@@ -310,7 +317,8 @@ data:
             {
               "refId": "A",
               "queryType": "statsRange",
-              "expr": "{namespace=\"tally\"} | unpack_json | filter msg:=\"event\" event:=\"sweep\" | stats sum(due_rules) due_rules, sum(tx_created) tx_created, sum(cc_payments) cc_payments"
+              "expr": "{namespace=\"tally\"} | unpack_json | filter msg:=\"req\" status:=401 | stats by (route) count() c",
+              "legendFormat": "{{route}}"
             }
           ],
           "fieldConfig": {
@@ -325,14 +333,14 @@ data:
           }
         },
         {
-          "id": 8,
+          "id": 209,
           "type": "logs",
           "title": "Server errors — stderr (5xx + stack traces)",
           "gridPos": {
-            "x": 12,
-            "y": 12,
-            "w": 12,
-            "h": 7
+            "x": 0,
+            "y": 20,
+            "w": 24,
+            "h": 10
           },
           "datasource": {
             "type": "victoriametrics-logs-datasource",
@@ -342,6 +350,35 @@ data:
             {
               "refId": "A",
               "expr": "{namespace=\"tally\", stream=\"stderr\"}"
+            }
+          ],
+          "options": {
+            "showTime": true,
+            "wrapLogMessage": true,
+            "sortOrder": "Descending",
+            "dedupStrategy": "none",
+            "showLabels": false,
+            "showCommonLabels": false
+          }
+        },
+        {
+          "id": 210,
+          "type": "logs",
+          "title": "Logs — namespace=tally",
+          "gridPos": {
+            "x": 0,
+            "y": 30,
+            "w": 24,
+            "h": 12
+          },
+          "datasource": {
+            "type": "victoriametrics-logs-datasource",
+            "uid": "${logs_datasource}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "{namespace=\"tally\"}"
             }
           ],
           "options": {

@@ -5,12 +5,12 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: grafana-dashboard-tally
+  name: grafana-dashboard-tally-api
   namespace: observability
   labels:
     grafana_dashboard: "1"
 data:
-  tally.json: |
+  tally-api.json: |
     {
       "annotations": {
         "list": []
@@ -22,8 +22,8 @@ data:
         "tenant",
         "tally"
       ],
-      "title": "Tally / Overview",
-      "uid": "tenant-tally",
+      "title": "Tally / API",
+      "uid": "tenant-tally-api",
       "version": 3,
       "time": {
         "from": "now-6h",
@@ -56,9 +56,9 @@ data:
       },
       "panels": [
         {
-          "id": 1,
+          "id": 101,
           "type": "stat",
-          "title": "API replicas (ready / desired)",
+          "title": "Requests (range)",
           "gridPos": {
             "x": 0,
             "y": 0,
@@ -66,19 +66,14 @@ data:
             "h": 4
           },
           "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
+            "type": "victoriametrics-logs-datasource",
+            "uid": "${logs_datasource}"
           },
           "targets": [
             {
               "refId": "A",
-              "legendFormat": "ready",
-              "expr": "kube_deployment_status_replicas_ready{namespace=\"tally\",deployment=\"api\"}"
-            },
-            {
-              "refId": "B",
-              "legendFormat": "desired",
-              "expr": "kube_deployment_spec_replicas{namespace=\"tally\",deployment=\"api\"}"
+              "queryType": "stats",
+              "expr": "{namespace=\"tally\"} | unpack_json | filter msg:=\"req\" | stats count() reqs"
             }
           ],
           "fieldConfig": {
@@ -88,9 +83,9 @@ data:
           }
         },
         {
-          "id": 2,
+          "id": 102,
           "type": "stat",
-          "title": "Restarts last 24h",
+          "title": "p95 latency (ms)",
           "gridPos": {
             "x": 6,
             "y": 0,
@@ -98,43 +93,24 @@ data:
             "h": 4
           },
           "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
+            "type": "victoriametrics-logs-datasource",
+            "uid": "${logs_datasource}"
           },
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(increase(kube_pod_container_status_restarts_total{namespace=\"tally\"}[24h]))"
+              "queryType": "stats",
+              "expr": "{namespace=\"tally\"} | unpack_json | filter msg:=\"req\" | stats quantile(0.95, dur_ms) p95"
             }
           ],
           "fieldConfig": {
             "defaults": {
-              "unit": "short",
-              "color": {
-                "mode": "thresholds"
-              },
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": null
-                  },
-                  {
-                    "color": "yellow",
-                    "value": 1
-                  },
-                  {
-                    "color": "red",
-                    "value": 5
-                  }
-                ]
-              }
+              "unit": "ms"
             }
           }
         },
         {
-          "id": 3,
+          "id": 103,
           "type": "stat",
           "title": "5xx (range)",
           "gridPos": {
@@ -181,9 +157,9 @@ data:
           }
         },
         {
-          "id": 4,
+          "id": 104,
           "type": "stat",
-          "title": "Sweeps (last 2h)",
+          "title": "4xx (range)",
           "gridPos": {
             "x": 18,
             "y": 0,
@@ -198,34 +174,21 @@ data:
             {
               "refId": "A",
               "queryType": "stats",
-              "expr": "{namespace=\"tally\"} | unpack_json | filter msg:=\"event\" event:=\"sweep\" | stats count() sweeps"
+              "expr": "{namespace=\"tally\"} | unpack_json | filter msg:=\"req\" class:=\"4xx\" | stats count() c"
             }
           ],
           "fieldConfig": {
             "defaults": {
               "unit": "short",
               "color": {
-                "mode": "thresholds"
-              },
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "red",
-                    "value": null
-                  },
-                  {
-                    "color": "green",
-                    "value": 1
-                  }
-                ]
+                "mode": "fixed",
+                "fixedColor": "blue"
               }
             }
-          },
-          "timeFrom": "2h"
+          }
         },
         {
-          "id": 5,
+          "id": 105,
           "type": "timeseries",
           "title": "Requests by status class",
           "gridPos": {
@@ -261,7 +224,7 @@ data:
           }
         },
         {
-          "id": 6,
+          "id": 106,
           "type": "timeseries",
           "title": "Request latency (ms) — p50 / p95 / p99",
           "gridPos": {
@@ -293,13 +256,13 @@ data:
           }
         },
         {
-          "id": 7,
+          "id": 107,
           "type": "timeseries",
-          "title": "Sweep throughput (rules / txns / cc-payments)",
+          "title": "Requests by method",
           "gridPos": {
             "x": 0,
             "y": 12,
-            "w": 12,
+            "w": 8,
             "h": 7
           },
           "datasource": {
@@ -310,7 +273,8 @@ data:
             {
               "refId": "A",
               "queryType": "statsRange",
-              "expr": "{namespace=\"tally\"} | unpack_json | filter msg:=\"event\" event:=\"sweep\" | stats sum(due_rules) due_rules, sum(tx_created) tx_created, sum(cc_payments) cc_payments"
+              "expr": "{namespace=\"tally\"} | unpack_json | filter msg:=\"req\" | stats by (method) count() reqs",
+              "legendFormat": "{{method}}"
             }
           ],
           "fieldConfig": {
@@ -325,13 +289,13 @@ data:
           }
         },
         {
-          "id": 8,
-          "type": "logs",
-          "title": "Server errors — stderr (5xx + stack traces)",
+          "id": 108,
+          "type": "timeseries",
+          "title": "Traffic per pod",
           "gridPos": {
-            "x": 12,
+            "x": 8,
             "y": 12,
-            "w": 12,
+            "w": 8,
             "h": 7
           },
           "datasource": {
@@ -341,16 +305,50 @@ data:
           "targets": [
             {
               "refId": "A",
-              "expr": "{namespace=\"tally\", stream=\"stderr\"}"
+              "queryType": "statsRange",
+              "expr": "{namespace=\"tally\"} | unpack_json | filter msg:=\"req\" | stats by (pod) count() reqs",
+              "legendFormat": "{{pod}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 1,
+                "fillOpacity": 10
+              }
+            }
+          }
+        },
+        {
+          "id": 109,
+          "type": "table",
+          "title": "Slowest routes (max ms)",
+          "gridPos": {
+            "x": 16,
+            "y": 12,
+            "w": 8,
+            "h": 7
+          },
+          "datasource": {
+            "type": "victoriametrics-logs-datasource",
+            "uid": "${logs_datasource}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "queryType": "stats",
+              "expr": "{namespace=\"tally\"} | unpack_json | filter msg:=\"req\" | stats by (method, route) max(dur_ms) max_ms, quantile(0.95, dur_ms) p95, count() reqs | sort by (max_ms desc) | limit 25"
             }
           ],
           "options": {
-            "showTime": true,
-            "wrapLogMessage": true,
-            "sortOrder": "Descending",
-            "dedupStrategy": "none",
-            "showLabels": false,
-            "showCommonLabels": false
+            "showHeader": true
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            }
           }
         }
       ]
