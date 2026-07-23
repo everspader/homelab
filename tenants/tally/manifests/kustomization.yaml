@@ -19,6 +19,6 @@ resources:
 # the tally release workflow (api@x.y.z / worker@x.y.z tags).
 images:
   - name: ghcr.io/everspader/tally-api
-    newTag: 1.16.0
+    newTag: 1.17.0
   - name: ghcr.io/everspader/tally-worker
     newTag: 0.4.0
