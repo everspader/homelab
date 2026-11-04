@@ -13,6 +13,7 @@ resources:
   - api/service.yaml
   - api/job.yaml
   - worker/deployment.yaml
+  - postgres-host.yaml
 # Single source of truth for tally image tags. The api Deployment and the
 # PreSync migrate Job both reference `tally-api`; the worker Deployment
 # references `tally-worker`. Each image is built+published independently by

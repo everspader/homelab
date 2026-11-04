@@ -1,0 +1,39 @@
+# Headless Service + manual EndpointSlice pointing at the host Postgres
+# (systemd postgresql@17-main on the node). Keeps pod->DB traffic on the
+# LAN/pod-network path instead of hairpinning through tailscale0 — so an
+# expired/flapping tailscale key can't take the app down.
+#
+# Target IP is the node's InternalIP (eno1). The wifi-fallback IP
+# (192.168.68.109) is *not* listed because pg_hba allows 192.168.0.0/16
+# already; if eno1 ever dies we'd rewrite this one address.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-host
+  namespace: tally
+spec:
+  type: ClusterIP
+  clusterIP: None   # headless — DNS returns the endpoint IP directly
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+      protocol: TCP
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: postgres-host
+  namespace: tally
+  labels:
+    kubernetes.io/service-name: postgres-host
+addressType: IPv4
+ports:
+  - name: postgres
+    port: 5432
+    protocol: TCP
+endpoints:
+  - addresses: ["192.168.68.106"]   # node InternalIP (eno1)
+    conditions:
+      ready: true
