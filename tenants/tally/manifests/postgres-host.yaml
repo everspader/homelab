@@ -1,11 +1,14 @@
-# Headless Service + manual EndpointSlice pointing at the host Postgres
+# Headless Service + manual Endpoints pointing at the host Postgres
 # (systemd postgresql@17-main on the node). Keeps pod->DB traffic on the
 # LAN/pod-network path instead of hairpinning through tailscale0 — so an
 # expired/flapping tailscale key can't take the app down.
 #
-# Target IP is the node's InternalIP (eno1). The wifi-fallback IP
-# (192.168.68.109) is *not* listed because pg_hba allows 192.168.0.0/16
-# already; if eno1 ever dies we'd rewrite this one address.
+# NOTE: We use the legacy `v1 Endpoints` resource (not the newer
+# `discovery.k8s.io/v1 EndpointSlice`) because ArgoCD's default
+# resource.exclusions list suppresses EndpointSlice. Endpoints is
+# deprecated in k8s v1.33+ but still functional and is the pragmatic
+# choice for GitOps-managed static host targets. kube-proxy mirrors
+# Endpoints into an auto-generated EndpointSlice internally.
 ---
 apiVersion: v1
 kind: Service
@@ -21,19 +24,15 @@ spec:
       targetPort: 5432
       protocol: TCP
 ---
-apiVersion: discovery.k8s.io/v1
-kind: EndpointSlice
+apiVersion: v1
+kind: Endpoints
 metadata:
-  name: postgres-host
+  name: postgres-host   # MUST match the Service name
   namespace: tally
-  labels:
-    kubernetes.io/service-name: postgres-host
-addressType: IPv4
-ports:
-  - name: postgres
-    port: 5432
-    protocol: TCP
-endpoints:
-  - addresses: ["192.168.68.106"]   # node InternalIP (eno1)
-    conditions:
-      ready: true
+subsets:
+  - addresses:
+      - ip: 192.168.68.106   # node InternalIP (eno1)
+    ports:
+      - name: postgres
+        port: 5432
+        protocol: TCP
