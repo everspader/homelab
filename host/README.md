@@ -30,6 +30,12 @@ This directory is in the repo for diff history and rebuild reproducibility, **no
 | --- | --- | --- |
 | `host/hermes/sudoers.d/50-hermes-cli` | `/etc/sudoers.d/50-hermes-cli` | `sudo install -m 0440 -o root -g root /opt/homelab/host/hermes/sudoers.d/50-hermes-cli /etc/sudoers.d/50-hermes-cli && sudo visudo -cf /etc/sudoers.d/50-hermes-cli` |
 
+### One-shot provisioning scripts (run by hand, not symlinked)
+
+| Repo path | Purpose |
+| --- | --- |
+| `host/postgres/provision-nestapp.sql` | Creates `nestapp` + `nestapp_dev` databases and dedicated roles on the host Postgres. Passwords passed as psql variables; usage in the file header. |
+
 ### Reference-only (template, not symlinked)
 
 | Repo path | Real path on box | Why off-repo |
