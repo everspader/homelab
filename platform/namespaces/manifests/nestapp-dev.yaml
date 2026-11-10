@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nestapp-dev
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: nestapp-dev-quota
+  namespace: nestapp-dev
+# Dev api (RollingUpdate surge, 1 extra pod) plus headroom for the PreSync
+# migrate Job. Revisit when a prod api is added.
+spec:
+  hard:
+    requests.cpu: "500m"
+    requests.memory: 512Mi
+    limits.cpu: "1"
+    limits.memory: 1Gi
