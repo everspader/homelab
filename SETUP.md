@@ -25,7 +25,7 @@ _Last verified against the running box: 2026-11-12 (k3s v1.35.4+k3s1, Postgres 1
 | 9     | Observability (VictoriaMetrics + VictoriaLogs + Grafana) | ✅ done |
 | 10    | ArgoCD Image Updater                                   | ✅ done |
 | 11    | Host Postgres 17 + pgBackRest to R2                    | ✅ done |
-| 12    | etcd backups                                           | 🟡 partial (local snapshots only; no offsite) |
+| 12    | etcd backups (local + R2 offsite)                      | ✅ done (restore not tested) |
 | 13    | Adding a new tenant                                    | – reference |
 | 14    | Hermes agent (host-level)                              | ✅ done |
 
@@ -33,7 +33,7 @@ _Last verified against the running box: 2026-11-12 (k3s v1.35.4+k3s1, Postgres 1
 
 Deferred work. Not blocking, but written down so it is not forgotten.
 
-- [ ] **etcd offsite snapshots (Phase 12.2).** Local snapshots run on the k3s default schedule. Nothing leaves the box yet.
+- [ ] **etcd restore test (Phase 12.4).** Restore an R2 snapshot on a spare VM once to prove it works.
 - [ ] **pgBackRest restore test routine.** Monthly automated restore of the latest backup into a side cluster on a different port. Assert that key tables exist, then tear it down. A `pgbackrest@verify.timer` would do it.
 - [ ] **R2 bucket versioning + delete protection** on the pgBackRest bucket. Protects against deletion of all backups through a compromised API key.
 - [ ] **Reflector for a cluster-wide imagePullSecret.** Each tenant has its own `ghcr-pull` SealedSecret (4 copies today). Reflector mirrors one source Secret into N namespaces by annotation.
@@ -1106,23 +1106,40 @@ etcd-snapshot-schedule-cron: "0 */6 * * *"
 etcd-snapshot-retention: 12
 ```
 
-### 12.2 S3-compatible offsite (pending)
+### 12.2 Offsite copies to Cloudflare R2
 
-Use Cloudflare R2 (a separate bucket from pgBackRest). The S3 credentials must **not** go in the repo. k3s merges every `*.yaml` in `/etc/rancher/k3s/config.yaml.d/` after `config.yaml`, so put them in a root-only file there:
+Every scheduled snapshot is also uploaded to the R2 bucket `homelab-etcd`, which keeps the last 14 (7 days). The local copies stay as before.
+
+1. Cloudflare → R2: create the bucket `homelab-etcd` and an API token with **Object Read & Write** scoped to that bucket only. Do not reuse the pgBackRest token.
+2. The S3 settings include the token, so they must **not** go in the repo. k3s merges every `*.yaml` in `/etc/rancher/k3s/config.yaml.d/` after `config.yaml`, so put them in a root-only file there. Write it with a `.pending` suffix first: k3s ignores that name, so a reboot before the keys are filled in cannot break k3s startup.
 
 ```bash
-sudo install -d -m 0700 /etc/rancher/k3s/config.yaml.d
-sudo tee /etc/rancher/k3s/config.yaml.d/90-secrets.yaml >/dev/null <<'EOF'
+sudo install -d -m 0700 -o root -g root /etc/rancher/k3s/config.yaml.d
+sudo install -m 0600 -o root -g root /dev/null /etc/rancher/k3s/config.yaml.d/90-secrets.yaml.pending
+sudo tee /etc/rancher/k3s/config.yaml.d/90-secrets.yaml.pending >/dev/null <<'EOF'
 etcd-s3: true
-etcd-s3-endpoint: <account-id>.r2.cloudflarestorage.com
+etcd-s3-endpoint: <account-id>.r2.cloudflarestorage.com   # host only, no https://
 etcd-s3-bucket: homelab-etcd
 etcd-s3-region: auto
-etcd-s3-access-key: <KEY>
-etcd-s3-secret-key: <SECRET>
+etcd-s3-bucket-lookup-type: path                         # R2 needs path-style requests
+etcd-s3-retention: 14
+etcd-s3-access-key: REPLACE_ME
+etcd-s3-secret-key: REPLACE_ME
 EOF
-sudo chmod 0600 /etc/rancher/k3s/config.yaml.d/90-secrets.yaml
-sudo systemctl restart k3s
+sudoedit /etc/rancher/k3s/config.yaml.d/90-secrets.yaml.pending   # fill in both keys, save, quit
 ```
+
+3. Check that no placeholder is left, activate the file, restart k3s, and take a snapshot. The restart makes the API server unavailable for about 30 seconds; running pods are not affected.
+
+```bash
+sudo grep -c REPLACE_ME /etc/rancher/k3s/config.yaml.d/90-secrets.yaml.pending   # must print 0
+sudo mv /etc/rancher/k3s/config.yaml.d/90-secrets.yaml.pending /etc/rancher/k3s/config.yaml.d/90-secrets.yaml
+sudo systemctl restart k3s
+sudo k3s etcd-snapshot save                  # uploads to R2 too
+sudo k3s etcd-snapshot ls                    # the new snapshot appears twice: file:// and s3://homelab-etcd/
+```
+
+Expected noise: `sudo k3s etcd-snapshot ...` warns `Unknown flag --tls-san found in config.yaml, skipping` (the subcommand ignores server-only flags), and `kubectl` run as `home` warns `open /etc/rancher/k3s/config.yaml.d: permission denied` (the directory is root-only). Both are harmless.
 
 ### 12.3 Restore
 
@@ -1131,6 +1148,8 @@ sudo systemctl stop k3s
 sudo k3s server --cluster-reset --cluster-reset-restore-path=<snapshot-path-or-name>
 sudo systemctl start k3s
 ```
+
+On a rebuilt box the local snapshots are gone. Restore from R2 by name: put `90-secrets.yaml` (from 1Password) back in place first, so the restore command reads the S3 settings, then pass a snapshot name from `sudo k3s etcd-snapshot ls` as the restore path.
 
 A restore brings back cluster state (including the Sealed Secrets keys stored in etcd). PVC data and host Postgres are separate (Phase 11, Followups).
 
@@ -1141,7 +1160,7 @@ Test on a spare VM once. An untested backup is not a backup.
 **Verify:**
 
 ```bash
-sudo k3s etcd-snapshot ls        # recent snapshots, local and (once 12.2 is done) s3
+sudo k3s etcd-snapshot ls        # recent snapshots, each listed as file:// and s3://homelab-etcd/
 ```
 
 ---

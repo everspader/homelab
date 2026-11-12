@@ -63,5 +63,5 @@ The `90-home-nopasswd` fragment for the `home` user is not tracked; SETUP.md Pha
 
 Files in `host/` are plaintext-only — never commit secrets here.
 
-- **k3s:** etcd S3 credentials (`etcd-s3-access-key`, `etcd-s3-secret-key`; SETUP.md Phase 12.2, not set up yet) go in `/etc/rancher/k3s/config.yaml.d/90-secrets.yaml` on the box, **not** the repo. K3s merges every `*.yaml` in `config.yaml.d/` after `config.yaml`. Sealed Secrets can't help — k3s reads its config before the cluster (and the Sealed Secrets controller) exists.
+- **k3s:** etcd S3 credentials (`etcd-s3-access-key`, `etcd-s3-secret-key`; SETUP.md Phase 12.2) live in `/etc/rancher/k3s/config.yaml.d/90-secrets.yaml` on the box, **not** the repo. K3s merges every `*.yaml` in `config.yaml.d/` after `config.yaml`. Sealed Secrets can't help — k3s reads its config before the cluster (and the Sealed Secrets controller) exists.
 - **Postgres:** the `postgres` superuser password, per-app role passwords, and pgBackRest R2 credentials live in 1Password and on the box at `/etc/pgbackrest/pgbackrest.conf` (mode 0600, owned by `postgres`). Same constraint — Sealed Secrets is k8s-only, host Postgres exists outside the cluster.
