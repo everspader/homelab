@@ -9,6 +9,9 @@ This directory is in the repo for diff history and rebuild reproducibility, **no
 - The repo is cloned to `/opt/homelab` on the box (owned by `home:home`). `/opt` is world-traversable, so system services like `postgresql` can read symlinked files via this path; `/home/home/` is mode 0750 and would otherwise block them.
 - Files in `host/` are referenced from their canonical system paths via symlink.
 - Editing one of these files in the repo + `git pull` on the box + restarting the relevant service is the full apply path.
+- First-time install: create each symlink with `sudo ln -s <repo path> <system path>`. Never `ln -sf`: if the system path already holds a real file (e.g. the stock `pg_hba.conf`), move it aside first. The step-by-step order is in [SETUP.md](../SETUP.md) (k3s: Phase 3, Postgres: Phase 11, Hermes: Phase 14).
+
+Not tracked here: Tailscale (installed from its apt repo, state in `/var/lib/tailscale`), ufw rules (listed in SETUP.md Phase 2.3), and the `home` user's sudoers/sshd drop-ins (SETUP.md Phase 2).
 
 ## Files
 
@@ -30,11 +33,13 @@ This directory is in the repo for diff history and rebuild reproducibility, **no
 | --- | --- | --- |
 | `host/hermes/sudoers.d/50-hermes-cli` | `/etc/sudoers.d/50-hermes-cli` | `sudo install -m 0440 -o root -g root /opt/homelab/host/hermes/sudoers.d/50-hermes-cli /etc/sudoers.d/50-hermes-cli && sudo visudo -cf /etc/sudoers.d/50-hermes-cli` |
 
+The `90-home-nopasswd` fragment for the `home` user is not tracked; SETUP.md Phase 2.1 creates it.
+
 ### One-shot provisioning scripts (run by hand, not symlinked)
 
 | Repo path | Purpose |
 | --- | --- |
-| `host/postgres/provision-nestapp.sql` | Creates `nestapp` + `nestapp_dev` databases and dedicated roles on the host Postgres. Passwords passed as psql variables; usage in the file header. |
+| `host/postgres/provision-<tenant>.sql` | Creates a tenant's databases and dedicated roles on the host Postgres. Passwords passed as psql variables; usage in each file's header. `provision-nestapp.sql` is the template. |
 
 ### Reference-only (template, not symlinked)
 
@@ -46,5 +51,5 @@ This directory is in the repo for diff history and rebuild reproducibility, **no
 
 Files in `host/` are plaintext-only — never commit secrets here.
 
-- **k3s:** Phase 12 etcd S3 credentials (`etcd-s3-access-key`, `etcd-s3-secret-key`) go in `/etc/rancher/k3s/config.yaml.d/90-secrets.yaml` on the box, **not** the repo. K3s merges every `*.yaml` in `config.yaml.d/` after `config.yaml`. Sealed Secrets can't help — k3s reads its config before the cluster (and the Sealed Secrets controller) exists.
+- **k3s:** etcd S3 credentials (`etcd-s3-access-key`, `etcd-s3-secret-key`; SETUP.md Phase 12.2, not set up yet) go in `/etc/rancher/k3s/config.yaml.d/90-secrets.yaml` on the box, **not** the repo. K3s merges every `*.yaml` in `config.yaml.d/` after `config.yaml`. Sealed Secrets can't help — k3s reads its config before the cluster (and the Sealed Secrets controller) exists.
 - **Postgres:** the `postgres` superuser password, per-app role passwords, and pgBackRest R2 credentials live in 1Password and on the box at `/etc/pgbackrest/pgbackrest.conf` (mode 0600, owned by `postgres`). Same constraint — Sealed Secrets is k8s-only, host Postgres exists outside the cluster.

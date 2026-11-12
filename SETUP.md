@@ -1,72 +1,91 @@
-# Homelab on GMKtec NucBox G11 (k3s) — first tenant: Rookia
+# Homelab on GMKtec NucBox G11 (k3s)
 
 > Hardware: GMKtec NucBox G11 · AMD Ryzen Embedded R2514 (4C/8T) · 16GB DDR4 · 512GB NVMe
 > Host: `homelab` (Ubuntu 26.04 LTS Server, minimal install)
 
-Step-by-step plan to stand up a single-node k3s cluster on a GMKtec NucBox G11 as a **general-purpose home server**, with Rookia (`apps/api` + pg-boss worker, currently on Railway) as the first production tenant. Structured so additional home services (Pi-hole, Home Assistant, Vaultwarden, Uptime Kuma, etc.) can be added later by dropping a new directory under `tenants/`. Each phase is small, achievable, and independently testable. Stop after any phase — nothing breaks.
+Step-by-step guide to stand up a single-node k3s cluster on a GMKtec NucBox G11 as a **general-purpose home server**, managed with GitOps (ArgoCD + Sealed Secrets) and exposed publicly through one shared Cloudflare Tunnel. Next to the cluster, the host runs Postgres (with pgBackRest backups to Cloudflare R2), Tailscale, and the Hermes agent.
+
+Each phase is small and independently testable. You can stop after any phase without breaking anything. Phases 0–7 are the bootstrap path and must run in order. Phases 8–14 can run in any order after that.
 
 ## Status
 
-_Last updated: 2026-05-10._
+_Last verified against the running box: 2026-11-12 (k3s v1.35.4+k3s1, Postgres 17.9, Tailscale 1.104.5)._
 
 | Phase | Title | Status |
 | ----- | ----- | ------ |
-| 0     | Hardware + BIOS                              | ✅ done |
-| 1     | Install Ubuntu Server 26.04 LTS              | ✅ done |
-| 2     | Base hardening (sudo NOPASSWD, ufw, etc.)    | ✅ done |
-| 3     | Install k3s single-node                      | ✅ done |
-| 4     | GitOps repo skeleton                         | ✅ done |
-| 5     | Sealed Secrets via Helm                      | ✅ done |
-| 6     | ArgoCD via Helm + GitHub App OAuth           | ✅ done |
-| 7     | Cloudflare Tunnel + Access on argo.spaderlabs.com | ✅ done |
-| 8     | amd64 image build in CI (Rookia repo)        | ⏳ next |
-| 9     | Seal Rookia `.env` + deploy API              | ⏳ pending |
-| 10    | Deploy pg-boss worker                        | ⏳ pending |
-| 11    | Cutover from Railway                         | ⏳ pending |
-| 12    | etcd backups (local + S3 offsite)            | ⏳ pending |
-| 13    | Adding a new tenant (template; not blocking) | – reference |
-| 14    | Tailscale for LAN-only services              | partial (host-side only) |
-| 15    | Observability (VictoriaMetrics + VictoriaLogs + Grafana) | ✅ done |
+| 0     | Hardware + BIOS                                        | ✅ done |
+| 1     | Install Ubuntu Server 26.04 LTS                        | ✅ done |
+| 2     | Base hardening (sudo, sshd, ufw, unattended-upgrades)  | ✅ done |
+| 3     | Install k3s single-node                                | ✅ done |
+| 4     | GitOps repo skeleton                                   | ✅ done |
+| 5     | Sealed Secrets via Helm                                | ✅ done |
+| 6     | ArgoCD via Helm + GitHub App repo creds + GitHub SSO   | ✅ done |
+| 7     | Cloudflare Tunnel + Access on `argo.spaderlabs.com`    | ✅ done |
+| 8     | Tailscale on the host                                  | ✅ done (host only; no k8s operator) |
+| 9     | Observability (VictoriaMetrics + VictoriaLogs + Grafana) | ✅ done |
+| 10    | ArgoCD Image Updater                                   | ✅ done |
+| 11    | Host Postgres 17 + pgBackRest to R2                    | ✅ done |
+| 12    | etcd backups                                           | 🟡 partial (local snapshots only; no offsite) |
+| 13    | Adding a new tenant                                    | – reference |
+| 14    | Hermes agent (host-level)                              | ✅ done |
 
 ## Followups
 
-Things deliberately deferred — not blocking, but write down before they're forgotten.
+Deferred work. Not blocking, but written down so it is not forgotten.
 
-- [ ] **pgBackRest restore test routine.** Monthly automated restore of the latest backup into a side cluster on a different port; assert key tables still exist; tear down. systemd timer `pgbackrest@verify.timer` would do it.
-- [ ] **Failure alerting on `pgbackrest@full.service`.** systemd `OnFailure=` hook to push a notification (email, Discord, ntfy, etc.) so a silently-failing weekly backup is caught before the cluster needs restoring.
-- [ ] **R2 bucket versioning + delete protection** on `tally-backup`. Mitigates accidental or malicious deletion of all backups via a compromised API key.
-- [ ] **Add `rookia_homelab` database + role** when Phase 9 starts. Same isolation pattern as `tally`: dedicated role, CONNECT revoked from PUBLIC.
-- [ ] **Install Reflector for cluster-wide imagePullSecret** once we hit 4+ tenants pulling from GHCR. Right now each tenant duplicates `ghcr-pull` SealedSecret; Reflector lets one source Secret mirror itself into N namespaces by annotation. Migration is trivial — one platform Application, then drop per-tenant SealedSecrets in favor of an annotation reference.
+- [ ] **etcd offsite snapshots (Phase 12.2).** Local snapshots run on the k3s default schedule. Nothing leaves the box yet.
+- [ ] **pgBackRest differential backups.** `pgbackrest@full.timer` (weekly full) is the only timer installed. Its comment and `repo1-retention-diff=8` assume a daily diff timer (`pgbackrest@diff.timer`) that does not exist yet. WAL archiving still gives point-in-time recovery between fulls.
+- [ ] **pgBackRest restore test routine.** Monthly automated restore of the latest backup into a side cluster on a different port. Assert that key tables exist, then tear it down. A `pgbackrest@verify.timer` would do it.
+- [ ] **Failure alerting on `pgbackrest@full.service`.** A systemd `OnFailure=` hook that pushes a notification (ntfy, Telegram via Hermes, email), so a weekly backup that fails silently is caught early.
+- [ ] **R2 bucket versioning + delete protection** on the pgBackRest bucket. Protects against deletion of all backups through a compromised API key.
+- [ ] **Reflector for a cluster-wide imagePullSecret.** Each tenant has its own `ghcr-pull` SealedSecret (4 copies today). Reflector mirrors one source Secret into N namespaces by annotation.
+- [ ] **PVC backups.** Restic or kopia for `/var/lib/rancher/k3s/storage/` (VMSingle, VictoriaLogs, Grafana). etcd snapshots cover cluster state only, not volume data.
+- [ ] **Tailscale Kubernetes operator** (optional). Only needed to expose individual Services on the tailnet. The host-level install already covers `ssh`, `kubectl` and Postgres.
 
 ## Assumptions
 
-- GMKtec NucBox G11, 16GB / 512GB NVMe, in hand
+- GMKtec NucBox G11, 16GB / 512GB NVMe
 - Wired Ethernet from the G11 to the TP-Link Deco mesh router (LAN IP `192.168.68.106`); wifi (`192.168.68.109`) available as fallback
-- Mac on same LAN
-- Cloudflare account with the `rookia.com` zone (Rookia tenant) and `spaderlabs.com` zone (personal / homelab infra hostnames, e.g. `argo.spaderlabs.com`)
-- GitHub account (SSH public keys imported into the host installer for passwordless login)
+- Mac with Homebrew, on the same LAN for the first phases (Tailscale for remote access later)
+- Cloudflare account with the `spaderlabs.com` zone (homelab infra hostnames, e.g. `argo.spaderlabs.com`) plus any tenant zones (e.g. `rookia.com`)
+- GitHub account `everspader` (SSH public keys imported into the host installer; owns the `homelab` repo and the tenant images on GHCR)
+- 1Password for every plaintext secret (Sealed Secrets backup key, ArgoCD admin password, R2 keys, Postgres role passwords)
 - USB stick (≥4GB) for the Ubuntu Server installer
 
 ## Out of scope (for now)
 
-HA control plane, multi-node, on-cluster Postgres (Neon stays remote for Rookia). PVs **are** in scope — bundled `local-path-provisioner` writes to NVMe, sufficient for single-node home services.
+HA control plane, multi-node, in-cluster Postgres. Databases run on the **host** Postgres (Phase 11) or on external managed providers. PVs **are** in scope: the bundled `local-path-provisioner` writes to the NVMe, which is enough for single-node services.
 
-## Tenancy model
+## Architecture at a glance
 
-- Cluster is **multi-tenant by namespace**. One namespace per logical app (`rookia`, `pihole`, `homeassistant`, ...).
-- Cluster-wide infrastructure (Sealed Secrets, ArgoCD, Cloudflare Tunnel) lives under `platform/` in the GitOps repo and `sealed-secrets` / `argocd` / `cloudflared` namespaces.
-- Each tenant gets its own ArgoCD Application, its own SealedSecret, and (where applicable) its own Cloudflare Tunnel public hostname.
-- Resource budgets enforced via `ResourceQuota` per namespace so one runaway tenant can't OOM another.
+```text
+Internet ──► Cloudflare (TLS, Access) ──► cloudflared pods (2x, outbound-only tunnel)
+                                              │
+                                              ▼
+                                   k3s Services (ClusterIP only)
+                                              │
+     ArgoCD ◄── GitHub (GitHub App creds + webhook) ── this repo
+       │
+       ├── platform/*   sealed-secrets, argocd, cloudflared, namespaces,
+       │                observability, argocd-image-updater
+       └── tenants/*    one namespace + quota per tenant
+
+Host (outside k3s): Postgres 17 + pgBackRest ──► R2 · Tailscale · Hermes agent · ufw
+```
+
+- Cluster is **multi-tenant by namespace**. One namespace per logical app, each with a `ResourceQuota`.
+- Cluster-wide infrastructure lives under `platform/`. Each subdirectory is one ArgoCD Application.
+- There is no ingress controller (Traefik disabled) and no LoadBalancer (ServiceLB disabled). All public traffic enters through the shared Cloudflare Tunnel. Private access is over Tailscale or the LAN.
 
 ## Build order at a glance
 
-1. **Phase 0–2** — hardware, Ubuntu Server, hardening. Bare host ready.
-2. **Phase 3** — k3s installed, `kubectl` works from the Mac.
-3. **Phase 4** — GitOps repo skeleton in place.
-4. **Phase 5** — Sealed Secrets controller installed via Helm. `kubeseal` can encrypt anything we'll need next (Cloudflare tunnel token, ArgoCD admin password, Rookia `.env`).
-5. **Phase 6** — ArgoCD installed via Helm, self-managing via the repo. Initial access via `kubectl port-forward`.
-6. **Phase 7** — Cloudflare Tunnel via Helm, token stored as a SealedSecret. First public hostname points at ArgoCD behind Cloudflare Access.
-7. **Phase 8+** — build Rookia images, deploy API + worker, cut over from Railway, backups, more tenants.
+1. **Phase 0–2:** hardware, Ubuntu Server, hardening. Bare host ready.
+2. **Phase 3:** k3s installed, `kubectl` works from the Mac.
+3. **Phase 4:** GitOps repo skeleton in place.
+4. **Phase 5:** Sealed Secrets controller installed with Helm. `kubeseal` can encrypt everything the next phases need.
+5. **Phase 6:** ArgoCD installed with Helm, then self-managing from the repo. First access through `kubectl port-forward`.
+6. **Phase 7:** Cloudflare Tunnel, token stored as a SealedSecret. First public hostname is ArgoCD behind Cloudflare Access.
+7. **Phase 8+:** Tailscale, observability, image updater, host Postgres, backups, tenants.
 
 ---
 
@@ -75,10 +94,10 @@ HA control plane, multi-node, on-cluster Postgres (Neon stays remote for Rookia)
 **Goal:** NucBox powered on, BIOS configured for headless server use.
 
 - [X] Unbox. Plug in keyboard, monitor (HDMI), Ethernet, power.
-- [X] Power on. Spam `Del` (or `F2` / `F7` depending on BIOS) at boot to enter BIOS/setup.
+- [X] Power on. Press `Del` (or `F2` / `F7` depending on BIOS) at boot to enter setup.
 - [X] In BIOS, set:
-  - **Virtualization (SVM Mode):** Enabled — required for any future VMs / nested containers.
-  - **Power on after AC loss / Restore on AC Power Loss:** Enabled — server auto-recovers from outages.
+  - **Virtualization (SVM Mode):** Enabled. Required for future VMs / nested containers.
+  - **Power on after AC loss / Restore on AC Power Loss:** Enabled. The server recovers from outages without a button press.
   - **Boot order:** Internal NVMe first; USB second (for the installer).
   - **Secure Boot:** Disabled (simplest for Ubuntu Server; can re-enable later with shim).
   - **Wake on LAN:** Optional, useful for remote power-on.
@@ -96,8 +115,8 @@ HA control plane, multi-node, on-cluster Postgres (Neon stays remote for Rookia)
 
 On the Mac:
 
-- [ ] Download Ubuntu Server 26.04 LTS ISO: <https://ubuntu.com/download/server>
-- [ ] Flash it to the USB stick. Easiest: [balenaEtcher](https://etcher.balena.io). Or `dd`:
+- [X] Download the Ubuntu Server 26.04 LTS ISO: <https://ubuntu.com/download/server>
+- [X] Flash it to the USB stick with [balenaEtcher](https://etcher.balena.io), or with `dd`:
 
 ```bash
 diskutil list                                # find the USB disk identifier (e.g. /dev/disk4)
@@ -108,18 +127,18 @@ diskutil eject /dev/diskN
 
 ### 1.2 Install Ubuntu
 
-- [ ] Insert the USB into the NucBox, boot. (If it doesn't boot from USB, hit the boot menu key — usually `F7` or `F11`.)
-- [ ] Pick **Try or Install Ubuntu Server**.
-- [ ] Subiquity walkthrough:
-  - **Variant:** Ubuntu Server (full), then pick the **minimal** option when offered. (Avoid the "Ubuntu Server (minimised)" cut-down flavour that drops cloud-init/snapd.)
-  - **Network:** plug Ethernet (`eno1`); subiquity picks up DHCP from the Deco. Wifi (`wlp2s0`) is optional fallback.
+- [X] Insert the USB into the NucBox and boot. (If it does not boot from USB, use the boot menu key, usually `F7` or `F11`.)
+- [X] Pick **Try or Install Ubuntu Server**.
+- [X] Subiquity walkthrough:
+  - **Variant:** Ubuntu Server (full), then pick the **minimal** option when offered. (Avoid the "Ubuntu Server (minimised)" flavour that drops cloud-init/snapd.)
+  - **Network:** plug Ethernet (`eno1`); subiquity gets DHCP from the Deco. Wifi (`wlp2s0`) is an optional fallback.
   - **Proxy:** leave blank.
-  - **Storage:** guided → use entire NVMe disk. Target the internal NVMe, not the USB.
-  - **Profile:** name `home`, hostname `homelab`, username `home`, strong password (used for console + sudo, never SSH).
+  - **Storage:** guided, use the entire NVMe disk. Target the internal NVMe, not the USB.
+  - **Profile:** name `home`, hostname `homelab`, username `home`, strong password (used for console + break-glass, never SSH).
   - **Ubuntu Pro:** skip.
-  - **SSH:** install OpenSSH server. Choose **"Import SSH identity → from GitHub"** and enter your GitHub username — the installer pulls your public keys directly from `github.com/<user>.keys` and writes them to `~/.ssh/authorized_keys`. No `ssh-copy-id` round-trip needed.
+  - **SSH:** install OpenSSH server. Choose **"Import SSH identity → from GitHub"** and enter your GitHub username. The installer pulls your public keys from `github.com/<user>.keys` into `~/.ssh/authorized_keys`.
   - **Featured server snaps:** skip.
-- [ ] Wait for install to finish, then reboot. **Remove the USB before it reboots** — otherwise it boots back into the installer.
+- [X] Wait for the install to finish, then reboot. **Remove the USB before it reboots**, or it boots back into the installer.
 
 ### 1.3 Find the NucBox on the LAN
 
@@ -127,32 +146,34 @@ The Deco assigns DHCP. From the Mac:
 
 ```bash
 ping homelab.local                   # mDNS (avahi); works on most LANs
-arp -a | grep -i homelab             # or grep router DHCP leases for the MAC
+arp -a | grep -i homelab             # or check the router DHCP leases for the MAC
 ```
 
-In the Deco app, pin the lease: **Clients → homelab → Reserve IP** so the address is stable. Current assignments: eth `192.168.68.106`, wifi `192.168.68.109`.
+In the Deco app, pin the lease: **Clients → homelab → Reserve IP**, so the address is stable. Current assignments: eth `192.168.68.106`, wifi `192.168.68.109`.
 
 ### 1.4 First SSH
 
-Keys were imported from GitHub during install, so the first connection is already passwordless:
+Keys were imported from GitHub during install, so the first connection is passwordless:
 
 ```bash
-ssh home@homelab.local               # or home@192.168.68.106
+ssh home@192.168.68.106
 ```
 
-Convenience aliases in `~/.ssh/config`:
+SSH aliases in `~/.ssh/config` on the Mac. `homelab` goes over Tailscale (Phase 8), so it works from anywhere. The `-lan` / `-wlan` aliases are for when Tailscale is down or not set up yet:
 
 ```sshconfig
 Host homelab
+    HostName 100.107.122.69          # Tailscale (Phase 8)
+    User home
+Host homelab-lan
     HostName 192.168.68.106
     User home
 Host homelab-wlan
     HostName 192.168.68.109
     User home
-Host homelab-ts
-    HostName 100.107.122.69          # Tailscale (Phase 14)
-    User home
 ```
+
+Until Phase 8 is done, use `homelab-lan`.
 
 ### 1.5 Update the system
 
@@ -179,7 +200,7 @@ cat /etc/os-release   # → Ubuntu 26.04 LTS
 
 ### 2.1 Passwordless `sudo` for the `home` user
 
-Single human user on a key-only LAN/Tailscale box — typing the password every `sudo` is friction with no security benefit. Drop a sudoers file in via `visudo`'s safe-edit path so a typo can't lock you out:
+Single human user on a key-only LAN/Tailscale box: a password prompt on every `sudo` adds friction with no security benefit. Add a sudoers file through `visudo`'s safe-edit path, so a typo cannot lock you out:
 
 ```bash
 echo 'home ALL=(ALL) NOPASSWD:ALL' \
@@ -192,14 +213,13 @@ sudo visudo -c                          # validates the entire sudoers tree
 
 ```bash
 sudo -n true && echo OK                 # → OK, no prompt
-sudo -n visudo -c                       # → /etc/sudoers: parsed OK
 ```
 
-The console (TTY) login still prompts for the `home` password — that's `getty`/PAM, not `sudo`, and it's the break-glass path if SSH ever breaks. Leave it.
+The console (TTY) login still asks for the `home` password. That is `getty`/PAM, not `sudo`, and it is the break-glass path if SSH breaks. Leave it.
 
 ### 2.2 Verify SSH password auth is disabled
 
-If you imported SSH keys from GitHub during the Ubuntu install (Phase 1.2), cloud-init has already dropped `/etc/ssh/sshd_config.d/50-cloud-init.conf` with `PasswordAuthentication no` + `PermitRootLogin no` + `KbdInteractiveAuthentication no`. Verify, don't redo:
+When SSH keys are imported from GitHub during the install, cloud-init writes `/etc/ssh/sshd_config.d/50-cloud-init.conf` with `PasswordAuthentication no` + `PermitRootLogin no` + `KbdInteractiveAuthentication no`. Verify:
 
 ```bash
 sudo sshd -T | egrep "^(passwordauthentication|permitrootlogin|kbdinteractiveauthentication|pubkeyauthentication) "
@@ -214,7 +234,7 @@ kbdinteractiveauthentication no
 pubkeyauthentication yes
 ```
 
-If any of those is still `yes` (e.g. fresh Debian install, or Ubuntu without GitHub-key import), drop an override at `/etc/ssh/sshd_config.d/99-homelab.conf`:
+If any of those is `yes`, add an override at `/etc/ssh/sshd_config.d/99-homelab.conf`:
 
 ```bash
 sudo tee /etc/ssh/sshd_config.d/99-homelab.conf >/dev/null <<'EOF'
@@ -226,11 +246,11 @@ sudo sshd -t                      # validate before reloading
 sudo systemctl reload ssh         # reload, not restart — keeps active sessions alive
 ```
 
-Don't edit `50-cloud-init.conf` directly; it's owned by cloud-init and may be regenerated. Higher-numbered dropins win.
+Do not edit `50-cloud-init.conf` directly; cloud-init owns it and can regenerate it. Higher-numbered drop-ins win.
 
-### 2.3 Install firewall, allow LAN-only access to SSH and the k3s API
+### 2.3 Firewall: LAN-only SSH and k3s API
 
-Order matters: **add allow rules before enabling ufw**, or you'll lock yourself out of the SSH session you're typing in.
+Order matters: **add the allow rules before you enable ufw**, or you lock yourself out of the SSH session you are typing in.
 
 ```bash
 sudo apt install -y ufw
@@ -239,10 +259,10 @@ sudo apt install -y ufw
 sudo ufw allow from 192.168.0.0/16 to any port 22   proto tcp
 sudo ufw allow from 192.168.0.0/16 to any port 6443 proto tcp
 
-# Tailscale interface — let everything in over the tailnet (zero-trust mesh, not the public internet)
+# Tailscale interface — allow everything over the tailnet (Phase 8)
 sudo ufw allow in on tailscale0
 
-# Sane defaults
+# Defaults
 sudo ufw default deny incoming
 sudo ufw default allow outgoing
 
@@ -250,23 +270,25 @@ sudo ufw --force enable
 sudo ufw status verbose
 ```
 
-`ufw enable` warns "may disrupt existing ssh connections" — it doesn't, your current session stays up because conntrack lets established flows through. From a *new* Mac terminal verify `ssh homelab true` still works before closing the existing session.
+`ufw enable` warns "may disrupt existing ssh connections". It does not: conntrack keeps established flows. From a *new* Mac terminal, verify that `ssh homelab-lan true` works before you close the existing session.
 
-Expected `ufw status verbose` (meaningful lines):
+Phase 11 adds two more rules for Postgres (`5432/tcp` from the LAN and from the k3s pod CIDR). The full expected rule set on a finished box:
 
 ```
 Status: active
-Default: deny (incoming), allow (outgoing), disabled (routed)
+Default: deny (incoming), allow (outgoing), deny (routed)
 
 To                         Action      From
 --                         ------      ----
 22/tcp                     ALLOW IN    192.168.0.0/16
 6443/tcp                   ALLOW IN    192.168.0.0/16
 Anywhere on tailscale0     ALLOW IN    Anywhere
-Anywhere (v6) on tailscale0 ALLOW IN  Anywhere (v6)
+5432/tcp                   ALLOW IN    192.168.0.0/16             # postgres - LAN
+5432/tcp                   ALLOW IN    10.42.0.0/16               # postgres - k3s pods
+Anywhere (v6) on tailscale0 ALLOW IN    Anywhere (v6)
 ```
 
-If you previously added rules without `proto tcp` (e.g. plain `port 22`), they'll appear as separate, broader entries (`22 ALLOW IN ...`). Delete the protoless versions to avoid duplicates:
+If you added rules without `proto tcp` (e.g. plain `port 22`), they show as separate, broader entries. Delete them:
 
 ```bash
 sudo ufw delete allow from 192.168.0.0/16 to any port 22
@@ -283,19 +305,19 @@ sudo dpkg-reconfigure -plow unattended-upgrades
 ### 2.5 Install basic tools
 
 ```bash
-sudo apt install -y htop vim curl git tmux ca-certificates lsb-release apache2-utils
+sudo apt install -y htop vim curl git tmux zsh ca-certificates lsb-release apache2-utils
 ```
 
-(`apache2-utils` ships `htpasswd`, used in Phase 6 to bcrypt the ArgoCD admin password.)
+(`apache2-utils` ships `htpasswd`, used in Phase 6 to bcrypt the ArgoCD admin password. The `home` user's login shell is `zsh`: `chsh -s /usr/bin/zsh`.)
 
-### 2.6 Confirm cgroup v2 + memory controller (Ubuntu 26.04 default; just verify)
+### 2.6 Confirm cgroup v2 + memory controller (Ubuntu 26.04 default; verify only)
 
 ```bash
 mount | grep cgroup2                       # cgroup2 on /sys/fs/cgroup
 cat /sys/fs/cgroup/cgroup.controllers      # must list memory cpu io
 ```
 
-If `memory` is missing (rare on stock Ubuntu 26.04), add it via GRUB:
+If `memory` is missing (rare on stock Ubuntu 26.04), add it with GRUB:
 
 ```bash
 echo 'GRUB_CMDLINE_LINUX_DEFAULT="quiet systemd.unified_cgroup_hierarchy=1"' | sudo tee -a /etc/default/grub
@@ -309,38 +331,45 @@ sudo reboot
 
 ## Phase 3 — Install k3s single-node (~20 min)
 
-**Goal:** working `kubectl get nodes` Ready, both from NucBox and Mac.
+**Goal:** `kubectl get nodes` shows Ready, both on the NucBox and from the Mac.
 
 ### 3.1 Clone the homelab repo on the box
 
-The k3s config file lives in this repo at [`host/k3s/config.yaml`](host/k3s/config.yaml) and gets symlinked into `/etc/rancher/k3s/`. So the box needs to clone the repo before k3s can start. See [`host/README.md`](host/README.md) for the broader contract — this is *source-controlled host config*, not GitOps. Pushes don't auto-apply; somebody runs `git pull && systemctl restart k3s` on the box.
+The k3s config lives in this repo at [`host/k3s/config.yaml`](host/k3s/config.yaml) and is symlinked into `/etc/rancher/k3s/`. So the box must clone the repo before k3s can start. See [`host/README.md`](host/README.md) for the contract: this is *source-controlled host config*, not GitOps. Pushes do not apply automatically; you run `git pull` and restart the service on the box.
 
 #### 3.1.1 Configure git identity
 
 On the homelab:
 
 ```bash
-git config --global user.email "everton.spader@gmail.com"
-git config --global user.name "Everton Spader"
+git config --global user.email "<your email>"
+git config --global user.name "<your name>"
 ```
 
 #### 3.1.2 Generate an SSH key for GitHub access
 
-Generate a dedicated ed25519 key on the box (don't reuse your Mac's key — different machines, different keys, easier to revoke):
+Generate a dedicated ed25519 key on the box. Do not reuse the Mac's key: different machines, different keys, easier to revoke.
 
 ```bash
 ssh-keygen -t ed25519 -C "home@homelab" -f ~/.ssh/id_ed25519_homelab -N ""
 cat ~/.ssh/id_ed25519_homelab.pub
 ```
 
-Two ways to authorize this key on GitHub — pick one:
+Point SSH at it for GitHub (`~/.ssh/config` on the box):
 
-- **A. Repo-scoped Deploy Key (preferred):** GitHub → `everspader/homelab` → Settings → Deploy keys → Add deploy key. Title: `homelab box (read)`. Paste the public key. **Do not** check "Allow write access". Smallest blast radius if the box is ever compromised; only this one repo is at risk.
-- **B. Personal SSH key:** GitHub → Settings → SSH and GPG keys → New SSH key. The key now authenticates the box as your account, with read+write to *every* repo you own. Convenient if the box will need to clone other repos later (e.g. Rookia source for ad-hoc work). If the box is compromised, every repo is exposed — revoke immediately by deleting the key on GitHub.
+```sshconfig
+Host github.com
+    IdentityFile ~/.ssh/id_ed25519_homelab
+```
 
-The current homelab uses option B because the box may pull additional repos later. ArgoCD (Phase 6.7) will use a separate, repo-scoped Deploy Key regardless — never reuse your personal key for in-cluster machinery.
+Two ways to authorize this key on GitHub. Pick one:
 
-Pre-trust GitHub's host key and verify:
+- **A. Repo-scoped Deploy Key:** GitHub → `everspader/homelab` → Settings → Deploy keys → Add deploy key. Leave "Allow write access" off. Smallest blast radius: only this repo is at risk if the box is compromised.
+- **B. Personal SSH key:** GitHub → Settings → SSH and GPG keys → New SSH key. The box can then read and write *every* repo you own. Convenient if the box clones other repos. If the box is compromised, revoke the key on GitHub immediately.
+
+The current box uses option B. In-cluster machinery never uses this key: ArgoCD uses a GitHub App (Phase 6.7), and the Hermes agent has its own deploy key (Phase 14).
+
+Trust GitHub's host key and verify:
 
 ```bash
 mkdir -p ~/.ssh && chmod 700 ~/.ssh
@@ -359,23 +388,28 @@ sudo chown -R home:home /opt/homelab
 ls /opt/homelab/host/k3s/config.yaml   # confirms host/ tree pulled in
 ```
 
-**Why `/opt/homelab` and not `~/homelab`:** `/home/home/` is mode 0750 by default; system services (`postgresql`, etc.) running as their own user can't traverse into it to read the symlinked configs. `/opt` is world-traversable, so any service can follow `/etc/.../foo -> /opt/homelab/host/.../foo`.
+`sudo git clone` runs as root and does not see `home`'s SSH key. If it fails with `Permission denied (publickey)`, clone as `home` into a directory you own first: `sudo install -d -o home -g home /opt/homelab && git clone git@github.com:everspader/homelab.git /opt/homelab`.
+
+**Why `/opt/homelab` and not `~/homelab`:** `/home/home/` is mode 0750. System services (`postgresql`, `hermes`, etc.) run as their own users and cannot traverse into it to read symlinked configs. `/opt` is world-traversable, so any service can follow `/etc/.../foo -> /opt/homelab/host/.../foo`.
 
 ### 3.2 Symlink the k3s config
 
+On a fresh box, `/etc/rancher/k3s/config.yaml` does not exist yet. Check first, and never use `ln -sf`: it silently replaces a real file.
+
 ```bash
 sudo mkdir -p /etc/rancher/k3s
-sudo ln -sf /opt/homelab/host/k3s/config.yaml /etc/rancher/k3s/config.yaml
-ls -l /etc/rancher/k3s/config.yaml   # verify the symlink target
-sudo cat /etc/rancher/k3s/config.yaml
+ls -la /etc/rancher/k3s/                  # must NOT already contain config.yaml
+sudo ln -s /opt/homelab/host/k3s/config.yaml /etc/rancher/k3s/config.yaml
+ls -l /etc/rancher/k3s/config.yaml        # verify the symlink target
 ```
 
 Why each line in `host/k3s/config.yaml`:
 
-- `write-kubeconfig-mode: "0644"` — kubeconfig readable without sudo (so `scp` to the Mac works as `home`).
-- `cluster-init: true` — embeds etcd instead of the default SQLite kine. Required for the Phase 12 snapshot mechanism and for adding nodes later.
-- `disable: [traefik, servicelb]` — Cloudflare Tunnel handles public ingress; no `LoadBalancer` Services on a single-node box.
-- `tls-san:` — extra Subject Alternative Names baked into the API server cert. Without these, `kubectl` from anything other than the node's primary IP fails TLS verification. Adding all addresses you might ever connect from (LAN eth/wifi, Tailscale, mDNS) avoids cert regeneration later.
+- `write-kubeconfig-mode: "0644"`: kubeconfig readable without sudo (so `scp` to the Mac works as `home`, and the Hermes agent can use it).
+- `cluster-init: true`: embedded etcd instead of the default SQLite kine. Required for etcd snapshots (Phase 12) and for adding nodes later.
+- `node-name: homelab`: stable node name, independent of the hostname.
+- `disable: [traefik, servicelb]`: Cloudflare Tunnel handles public ingress; no `LoadBalancer` Services on a single-node box.
+- `tls-san:`: extra Subject Alternative Names in the API server cert. Without them, `kubectl` from any address other than the node's primary IP fails TLS verification. The list covers LAN eth/wifi, Tailscale and mDNS, so the cert never needs regeneration.
 
 ### 3.3 Install k3s
 
@@ -383,31 +417,37 @@ Why each line in `host/k3s/config.yaml`:
 curl -sfL https://get.k3s.io | sh -
 ```
 
-The install script picks up `/etc/rancher/k3s/config.yaml` automatically — no flags needed. Wait for the node to be Ready:
+The install script reads `/etc/rancher/k3s/config.yaml` automatically; no flags needed. Wait for the node to be Ready:
 
 ```bash
 sudo k3s kubectl get nodes                       # → STATUS Ready
 sudo k3s kubectl get pods -A                     # coredns + metrics-server + local-path-provisioner Running
 ```
 
+Upgrades: re-run the same install command (optionally with `INSTALL_K3S_VERSION=v1.xx.y+k3s1`). It keeps the config and data.
+
 ### 3.4 Copy kubeconfig to the Mac
 
 On the Mac:
 
 ```bash
-scp homelab:/etc/rancher/k3s/k3s.yaml ~/.kube/homelab.yaml
-sed -i '' 's/127.0.0.1/192.168.68.106/' ~/.kube/homelab.yaml
+scp homelab-lan:/etc/rancher/k3s/k3s.yaml ~/.kube/homelab.yaml
+sed -i '' 's/127.0.0.1/100.107.122.69/' ~/.kube/homelab.yaml    # Tailscale IP; use 192.168.68.106 until Phase 8 is done
 export KUBECONFIG=~/.kube/homelab.yaml
 kubectl get nodes
 ```
 
-Persist `KUBECONFIG` in `~/.zshrc` (or merge into `~/.kube/config` with `KUBECONFIG=~/.kube/config:~/.kube/homelab.yaml kubectl config view --flatten > ~/.kube/merged && mv ~/.kube/merged ~/.kube/config`).
+The kubeconfig points at the Tailscale IP, so `kubectl` works from anywhere **while Tailscale runs on the Mac**. If `kubectl` hangs, check `tailscale status` on the Mac first. On the LAN, `--server https://192.168.68.106:6443` is a quick override.
+
+Persist `KUBECONFIG` in `~/.zshrc`, or merge into `~/.kube/config` with `KUBECONFIG=~/.kube/config:~/.kube/homelab.yaml kubectl config view --flatten > ~/.kube/merged && mv ~/.kube/merged ~/.kube/config`.
 
 ### 3.5 Install `helm` + `kubeseal` on the Mac
 
 ```bash
-brew install helm kubeseal
+brew install kubectl helm kubeseal
 ```
+
+These tools run on the Mac only. The box itself does not need `helm` or `kubeseal`.
 
 ### 3.6 Confirm the default storage class
 
@@ -415,82 +455,82 @@ brew install helm kubeseal
 kubectl get sc    # local-path (default)
 ```
 
-PVCs land on NVMe under `/var/lib/rancher/k3s/storage/`.
+PVCs land on the NVMe under `/var/lib/rancher/k3s/storage/`.
 
-**Verify:** Mac `kubectl get pods -A` lists `coredns`, `metrics-server`, `local-path-provisioner` Running.
+**Verify:** `kubectl get pods -A` from the Mac lists `coredns`, `metrics-server`, `local-path-provisioner` Running.
 
 ---
 
 ## Phase 4 — `homelab` GitOps repo skeleton (~30 min)
 
-**Goal:** create the repo where every Helm values file, SealedSecret, and Argo Application will live. Subsequent phases commit into this repo before the cluster ever sees them.
+**Goal:** the repo where every Helm values file, SealedSecret and ArgoCD Application lives. Later phases commit into this repo before the cluster sees anything.
 
 ### 4.1 Repo layout
 
-Create a new private GitHub repo `homelab`:
+Private GitHub repo `everspader/homelab`:
 
 ```text
-bootstrap/                       # one-shot manifests applied by hand
-  root-app.yaml                  # the root Argo Application (Phase 6)
-platform/                        # cluster-wide infra; each subdir == one Argo Application
-  sealed-secrets/
-    values.yaml                  # Helm values
-    app.yaml                     # Argo Application (Helm source)
-  argocd/
-    values.yaml                  # Helm values for the argo-cd chart
-    app.yaml                     # Argo Application (self-managing)
-    admin-password.sealedsecret.yaml
-  cloudflared/
-    values.yaml                  # Helm values for the cloudflare-tunnel chart
-    app.yaml                     # Argo Application (Helm source)
-    tunnel-token.sealedsecret.yaml
-  namespaces/                    # Namespace + ResourceQuota per tenant
-    rookia.yaml
-tenants/
-  rookia/
-    app.yaml
+bootstrap/
+  root-app.yaml                  # the root ArgoCD Application (app-of-apps), applied once by hand
+platform/                        # cluster-wide infra; each subdir == one ArgoCD Application
+  <component>/
+    app.yaml                     # ArgoCD Application (picked up by root)
+    values.yaml                  # Helm values, only for Helm-based components
+    manifests/                   # raw manifests applied by the Application (SealedSecrets, RBAC, ...)
+tenants/                         # one subdir per logical app
+  <tenant>/
+    app.yaml                     # ArgoCD Application
     manifests/
-      api/
-      worker/
-      sealed-env.yaml
-  <future-tenant>/
-    app.yaml
-    manifests/
+      kustomization.yaml         # resource list + pinned image tags (rewritten by Image Updater)
+      sealed-env.yaml            # SealedSecret: the tenant's env
+      sealed-ghcr-pull.yaml      # SealedSecret: GHCR imagePullSecret
+      <service>/                 # one subdir per Deployment (api/, worker/, ...)
+host/                            # host-level config, symlinked into the box (not ArgoCD)
 ```
 
-### 4.2 Clone locally
+Rules for this layout:
 
-```bash
-git clone git@github.com:<you>/homelab.git
-cd homelab
-```
+- The Application's source path points at `manifests/`, so everything in that directory is a manifest. No `directory.include`/`exclude` filters are needed.
+- `app.yaml` sits *outside* `manifests/`. The root Application owns it, not the component's own Application.
+- Components with no raw manifests (e.g. `sealed-secrets`, a pure Helm release) omit `manifests/`.
 
-### 4.3 Add a `.gitignore`
+### 4.2 `.gitignore`
 
 ```text
 # Decrypted secrets — never commit
 *.env
 .env
 .env.*
+
+# Sealed Secrets material
 pub-cert.pem
+*.pem
 sealed-secrets-key.backup.yaml
+
+# Repo deploy keys
 homelab-deploy-key
 homelab-deploy-key.pub
+
+# Editor / OS junk
+.DS_Store
+.idea/
+.vscode/
+*.swp
 ```
 
-Commit and push the empty skeleton.
+The plaintext source of each tenant secret lives at `tenants/<tenant>/.env` on the Mac only; the `*.env` rule keeps it out of git.
 
-**Verify:** Repo exists, `git pull` from another machine works, `.gitignore` in place.
+**Verify:** repo exists, `git pull` from another machine works, `.gitignore` in place.
 
 ---
 
 ## Phase 5 — Sealed Secrets via Helm (~30 min)
 
-**Goal:** Sealed Secrets controller installed via Helm. `kubeseal` on the Mac can encrypt any Secret into a committable `SealedSecret`. Installed **before** ArgoCD and Cloudflare so their sensitive config (ArgoCD admin password, tunnel token) can be declared in git from day one.
+**Goal:** Sealed Secrets controller installed with Helm. `kubeseal` on the Mac encrypts any Secret into a committable `SealedSecret`. Installed **before** ArgoCD and Cloudflare, so their sensitive config (ArgoCD secrets, tunnel token) is in git from day one.
 
 ### 5.1 Helm values
 
-`platform/sealed-secrets/values.yaml`:
+[`platform/sealed-secrets/values.yaml`](platform/sealed-secrets/values.yaml):
 
 ```yaml
 fullnameOverride: sealed-secrets-controller   # match kubeseal CLI's default
@@ -502,7 +542,7 @@ resources:
 
 ### 5.2 First install (by hand)
 
-Pin to a known-good chart version (check <https://github.com/bitnami-labs/sealed-secrets/releases> for the latest):
+Use the same chart version that [`platform/sealed-secrets/app.yaml`](platform/sealed-secrets/app.yaml) pins (currently `2.18.5`):
 
 ```bash
 helm repo add sealed-secrets https://bitnami-labs.github.io/sealed-secrets
@@ -510,14 +550,10 @@ helm repo update
 
 helm install sealed-secrets sealed-secrets/sealed-secrets \
   -n sealed-secrets --create-namespace \
-  --version <pinned> \
+  --version 2.18.5 \
   -f platform/sealed-secrets/values.yaml
-```
 
-Wait for the controller:
-
-```bash
-kubectl -n sealed-secrets rollout status deploy/sealed-secrets
+kubectl -n sealed-secrets rollout status deploy/sealed-secrets-controller
 ```
 
 ### 5.3 Fetch the public cert
@@ -526,11 +562,11 @@ kubectl -n sealed-secrets rollout status deploy/sealed-secrets
 kubeseal --fetch-cert > pub-cert.pem
 ```
 
-Keep `pub-cert.pem` local. It's not secret, but it's gitignored to avoid clutter. Every `kubeseal` invocation in the rest of this plan uses `--cert pub-cert.pem`.
+Keep `pub-cert.pem` local (gitignored). It is not secret. Every `kubeseal` command in this guide uses `--cert pub-cert.pem`.
 
 ### 5.4 Back up the controller's private key — **do this now**
 
-Without this file, every SealedSecret in `homelab` becomes useless on a fresh cluster.
+Without this key, every SealedSecret in the repo is useless on a fresh cluster.
 
 ```bash
 kubectl -n sealed-secrets get secret \
@@ -538,852 +574,310 @@ kubectl -n sealed-secrets get secret \
   -o yaml > sealed-secrets-key.backup.yaml
 ```
 
-Move this file into 1Password / Bitwarden / encrypted USB. Delete the local copy.
+Move the file into 1Password and delete the local copy. The controller adds a new key every 30 days (`keyrenewperiod`) and keeps the old ones, so **re-export after each rotation**, or at least before any rebuild. To restore on a new cluster: `kubectl apply -f sealed-secrets-key.backup.yaml` *before* installing the controller.
 
-### 5.5 Self-management Application (declared now, applied in Phase 6)
+### 5.5 Self-management Application
 
-`platform/sealed-secrets/app.yaml`:
-
-```yaml
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: sealed-secrets
-  namespace: argocd
-  finalizers:
-    - resources-finalizer.argocd.argoproj.io
-spec:
-  project: default
-  sources:
-    - chart: sealed-secrets
-      repoURL: https://bitnami-labs.github.io/sealed-secrets
-      targetRevision: <pinned>
-      helm:
-        valueFiles:
-          - $values/platform/sealed-secrets/values.yaml
-    - repoURL: https://github.com/<you>/homelab.git
-      targetRevision: HEAD
-      ref: values
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: sealed-secrets
-  syncPolicy:
-    automated: { selfHeal: true, prune: false }
-    syncOptions:
-      - ServerSideApply=true
-      - CreateNamespace=true
-```
-
-Commit and push. ArgoCD will adopt the existing controller in Phase 6.
+[`platform/sealed-secrets/app.yaml`](platform/sealed-secrets/app.yaml) is a multi-source Application: the upstream chart plus this repo as `$values`. `prune: false`, `ServerSideApply=true`, `CreateNamespace=true`. Commit and push. ArgoCD adopts the existing Helm release in Phase 6.
 
 ### 5.6 Smoke test `kubeseal`
 
-Create a throwaway sealed secret to confirm the round-trip works:
-
 ```bash
-kubectl create secret generic smoke \
+kubectl create secret generic smoke -n default \
   --from-literal=hello=world \
   --dry-run=client -o yaml \
   | kubeseal --cert pub-cert.pem -o yaml \
   > /tmp/smoke.sealed.yaml
 
 kubectl apply -f /tmp/smoke.sealed.yaml
-kubectl get secret smoke -o jsonpath='{.data.hello}' | base64 -d   # → world
-kubectl delete sealedsecret smoke
+kubectl -n default get secret smoke -o jsonpath='{.data.hello}' | base64 -d   # → world
+kubectl -n default delete sealedsecret smoke
 rm /tmp/smoke.sealed.yaml
 ```
 
-**Verify:** `kubeseal` encrypts, controller decrypts, Secret materialises, cleanup works.
+**Verify:** `kubeseal` encrypts, the controller decrypts, the Secret appears, cleanup works.
 
 ---
 
 ## Phase 6 — ArgoCD via Helm + self-management (~1.5 hr)
 
-**Goal:** ArgoCD installed via Helm, with all configuration (admin password, RBAC, resource limits, repo creds) declared in `homelab`. After bootstrap, ArgoCD reads its own `Application` from the repo and updates itself on every push. Initial access is via `kubectl port-forward` — the public hostname behind Cloudflare Access comes in Phase 7.
+**Goal:** ArgoCD installed with Helm, all of its configuration in git. After bootstrap, ArgoCD reads its own `Application` from the repo and updates itself on every push. Humans log in with GitHub (Dex); ArgoCD reads the repo through a GitHub App. Public access comes in Phase 7; until then use `kubectl port-forward`.
 
-### 6.1 Generate the admin password as a SealedSecret
+### 6.1 Create the GitHub OAuth App (for SSO through Dex)
 
-ArgoCD reads its admin password from a Secret named `argocd-secret`, key `admin.password` (bcrypt hash) plus `admin.passwordMtime`.
+GitHub → Settings → Developer settings → **OAuth Apps → New OAuth App**:
 
-Generate a strong random password and bcrypt-hash it:
+- Homepage URL: `https://argo.spaderlabs.com`
+- Authorization callback URL: `https://argo.spaderlabs.com/api/dex/callback`
+
+Generate a client secret. Keep the client ID and secret for 6.2.
+
+### 6.2 Seal `argocd-secret`
+
+ArgoCD reads one Secret named `argocd-secret`. The chart does not create it (`configs.secret.createSecret: false`); this repo owns it as [`platform/argocd/manifests/admin-password.sealedsecret.yaml`](platform/argocd/manifests/admin-password.sealedsecret.yaml). It holds:
+
+| Key | Purpose |
+| --- | --- |
+| `admin.password` / `admin.passwordMtime` | Local `admin` user (bcrypt). Break-glass login if GitHub SSO breaks. |
+| `server.secretkey` | Signs ArgoCD session tokens. Random. |
+| `dex.github.clientID` / `dex.github.clientSecret` | OAuth App from 6.1, read by `dex.config` as `$dex.github.*`. |
+| `webhook.github.secret` | Shared secret for the GitHub push webhook (6.8). |
+
+Generate and seal all of them together. This file is one SealedSecret, so a re-seal must always include every key:
 
 ```bash
 PASSWORD=$(openssl rand -base64 32)
-echo "Save this in your password manager: $PASSWORD"
 HASH=$(htpasswd -nbBC 10 "" "$PASSWORD" | tr -d ':\n' | sed 's/$2y/$2a/')
-```
+WEBHOOK_SECRET=$(openssl rand -hex 32)
+echo "Save in 1Password — admin password: $PASSWORD  webhook secret: $WEBHOOK_SECRET"
 
-(`htpasswd` ships in `apache2-utils` on Linux or comes preinstalled on macOS.)
-
-Save the plaintext `$PASSWORD` in 1Password before continuing — there is no recovery.
-
-Encrypt and commit:
-
-```bash
-kubectl create secret generic argocd-secret \
-  -n argocd \
+kubectl create secret generic argocd-secret -n argocd \
   --from-literal=admin.password="$HASH" \
-  --from-literal=admin.passwordMtime="$(date +%FT%T%Z)" \
+  --from-literal=admin.passwordMtime="$(date -u +%FT%TZ)" \
+  --from-literal=server.secretkey="$(openssl rand -base64 32)" \
+  --from-literal=dex.github.clientID='<oauth client id>' \
+  --from-literal=dex.github.clientSecret='<oauth client secret>' \
+  --from-literal=webhook.github.secret="$WEBHOOK_SECRET" \
   --dry-run=client -o yaml \
   | kubeseal --cert pub-cert.pem -o yaml \
-  > platform/argocd/admin-password.sealedsecret.yaml
+  > platform/argocd/manifests/admin-password.sealedsecret.yaml
 ```
 
-### 6.2 Helm values
+### 6.3 Helm values
 
-`platform/argocd/values.yaml`:
+[`platform/argocd/values.yaml`](platform/argocd/values.yaml) sets:
 
-```yaml
-global:
-  domain: argo.spaderlabs.com               # used in Phase 7 when tunnel goes up
+- `global.domain` + `configs.cm.url`: `argo.spaderlabs.com`.
+- `configs.params.server.insecure: "true"`: Cloudflare terminates TLS; ArgoCD speaks plain HTTP inside the cluster.
+- `configs.cm.dex.config`: one GitHub connector, client ID/secret from `argocd-secret`.
+- `configs.rbac`: default-deny (`policy.default: ''`), `scopes: '[email, groups]'`, and `g, <your GitHub-verified email>, role:admin`. The Dex GitHub connector emits no groups without an org filter, so RBAC matches on email.
+- `configs.secret.createSecret: false`.
+- Requests and limits on every component. `dex.enabled: true`, `notifications.enabled: false`.
 
-configs:
-  params:
-    server.insecure: "true"                # Cloudflare terminates TLS; ArgoCD speaks HTTP internally
-  cm:
-    url: https://argo.spaderlabs.com
-    timeout.reconciliation: 180s
-    application.instanceLabelKey: argocd.argoproj.io/instance
-  secret:
-    createSecret: false                    # we manage argocd-secret ourselves
+### 6.4 First install (by hand)
 
-controller:
-  resources:
-    requests: { cpu: 100m, memory: 256Mi }
-    limits:   { cpu: 500m, memory: 512Mi }
-
-server:
-  resources:
-    requests: { cpu: 50m, memory: 128Mi }
-    limits:   { cpu: 250m, memory: 256Mi }
-  service:
-    type: ClusterIP
-
-repoServer:
-  resources:
-    requests: { cpu: 50m, memory: 128Mi }
-    limits:   { cpu: 250m, memory: 256Mi }
-
-applicationSet:
-  enabled: true
-  resources:
-    requests: { cpu: 25m, memory: 64Mi }
-    limits:   { cpu: 100m, memory: 128Mi }
-
-notifications:
-  enabled: false
-dex:
-  enabled: false
-```
-
-### 6.3 First install (by hand)
-
-Apply the namespace and the admin password SealedSecret first:
+Apply the namespace and `argocd-secret` first, then install the chart version that [`platform/argocd/app.yaml`](platform/argocd/app.yaml) pins (currently `9.5.12`):
 
 ```bash
 kubectl create namespace argocd
-kubectl apply -f platform/argocd/admin-password.sealedsecret.yaml
-```
+kubectl apply -f platform/argocd/manifests/admin-password.sealedsecret.yaml
 
-Then install ArgoCD. Pin to a known-good chart version (<https://github.com/argoproj/argo-helm/releases>):
-
-```bash
 helm repo add argo https://argoproj.github.io/argo-helm
 helm repo update
 
 helm install argocd argo/argo-cd \
   -n argocd \
-  --version <pinned> \
+  --version 9.5.12 \
   -f platform/argocd/values.yaml
-```
 
-Wait for rollout:
-
-```bash
 kubectl -n argocd rollout status deploy/argocd-server
 ```
 
-### 6.4 First login via port-forward
-
-No public hostname yet. From the Mac:
+### 6.5 First login via port-forward
 
 ```bash
 kubectl -n argocd port-forward svc/argocd-server 8080:80
 ```
 
-Browse to `http://localhost:8080`, log in as `admin` with the password from 6.1. Stop port-forward once you've confirmed login works.
+Browse to `http://localhost:8080` and log in as `admin` with the password from 6.2. (GitHub SSO needs the public URL, so it works only after Phase 7.)
 
-### 6.5 Bootstrap the root Application (app-of-apps)
+### 6.6 Repo access: GitHub App
 
-`bootstrap/root-app.yaml`:
+ArgoCD reads the repo over HTTPS with a GitHub App. The same App also lets ArgoCD Image Updater (Phase 10) push tag bumps, so it needs write access.
 
-```yaml
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: root
-  namespace: argocd
-spec:
-  project: default
-  source:
-    repoURL: https://github.com/<you>/homelab.git
-    targetRevision: HEAD
-    path: .
-    directory:
-      recurse: true
-      include: "{platform/*/app.yaml,tenants/*/app.yaml}"
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: argocd
-  syncPolicy:
-    automated: { selfHeal: true, prune: true }
+1. GitHub → Settings → Developer settings → **GitHub Apps → New GitHub App**. Name e.g. `homelab-argocd`. Disable the webhook. Repository permissions: **Contents: Read and write**, Metadata: Read-only.
+2. Install the App on `everspader/homelab` only. Note the **App ID** and the **Installation ID** (the number at the end of the installation's settings URL).
+3. Generate a private key (`.pem`) and seal it as a `repo-creds` Secret (a credential template that matches every repo URL under the prefix):
+
+```bash
+kubectl create secret generic github-app-homelab -n argocd \
+  --from-literal=type=git \
+  --from-literal=url=https://github.com/everspader \
+  --from-literal=githubAppID='<app id>' \
+  --from-literal=githubAppInstallationID='<installation id>' \
+  --from-file=githubAppPrivateKey=./homelab-argocd.private-key.pem \
+  --dry-run=client -o yaml \
+  | kubectl label --local -f - argocd.argoproj.io/secret-type=repo-creds -o yaml \
+  | kubeseal --cert pub-cert.pem -o yaml \
+  > platform/argocd/manifests/github-app-creds.sealedsecret.yaml
+
+rm ./homelab-argocd.private-key.pem      # after saving it in 1Password
 ```
 
-This Application discovers every `app.yaml` under `platform/*/` and `tenants/*/` and creates an Argo Application for each.
+### 6.7 Bootstrap the root Application (app-of-apps)
 
-Apply once:
+[`bootstrap/root-app.yaml`](bootstrap/root-app.yaml) recursively includes `{platform/*/app.yaml,tenants/*/app.yaml}` with `selfHeal` + `prune`. Apply it once:
 
 ```bash
 kubectl apply -f bootstrap/root-app.yaml
 ```
 
-### 6.6 Self-management Application for ArgoCD
+From here, adding a component or tenant means adding a directory with an `app.yaml`. Never register Applications by hand.
 
-`platform/argocd/app.yaml`:
+[`platform/argocd/app.yaml`](platform/argocd/app.yaml) then adopts the Helm install. It has three sources: the `argo-cd` chart, this repo as `$values`, and `platform/argocd/manifests/` (the two SealedSecrets). `prune: false` so ArgoCD never prunes itself.
 
-```yaml
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: argocd
-  namespace: argocd
-  finalizers:
-    - resources-finalizer.argocd.argoproj.io
-spec:
-  project: default
-  sources:
-    - chart: argo-cd
-      repoURL: https://argoproj.github.io/argo-helm
-      targetRevision: <pinned>              # same version pinned in 6.3
-      helm:
-        valueFiles:
-          - $values/platform/argocd/values.yaml
-    - repoURL: https://github.com/<you>/homelab.git
-      targetRevision: HEAD
-      ref: values
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: argocd
-  syncPolicy:
-    automated: { selfHeal: true, prune: false }
-    syncOptions:
-      - ServerSideApply=true
-      - CreateNamespace=false
-```
+### 6.8 GitHub webhook (near-instant syncs)
 
-Push. Within a couple minutes the root Application picks it up; the `argocd` Application adopts the Helm install. From here on, edit `values.yaml`, push, ArgoCD updates itself.
+Without a webhook, ArgoCD polls every 180s (`timeout.reconciliation`). With one, a push syncs in seconds. GitHub → `everspader/homelab` → Settings → Webhooks → Add:
 
-### 6.7 Repo access (private repos only)
+- Payload URL: `https://argo.spaderlabs.com/api/webhook`
+- Content type: `application/json`
+- Secret: the `webhook.github.secret` value from 6.2
+- Events: just the push event
 
-If `homelab` is private, ArgoCD needs a read-only deploy key.
+This needs the public hostname from Phase 7, including the Cloudflare Access bypass for `/api/webhook` (7.5).
 
-```bash
-ssh-keygen -t ed25519 -f ./homelab-deploy-key -N "" -C "argocd@homelab"
-```
+### 6.9 The namespaces Application
 
-Add `./homelab-deploy-key.pub` as a Deploy Key on the GitHub repo (read-only).
-
-Encrypt the private key as a SealedSecret in the `argocd` namespace:
-
-```bash
-kubectl create secret generic homelab-repo \
-  -n argocd \
-  --from-file=sshPrivateKey=./homelab-deploy-key \
-  --from-literal=type=git \
-  --from-literal=url=git@github.com:<you>/homelab.git \
-  --dry-run=client -o yaml \
-  > /tmp/homelab-repo.secret.yaml
-```
-
-Edit `/tmp/homelab-repo.secret.yaml` and add this label so ArgoCD picks it up automatically:
-
-```yaml
-metadata:
-  labels:
-    argocd.argoproj.io/secret-type: repository
-```
-
-Then encrypt:
-
-```bash
-kubeseal --cert pub-cert.pem -o yaml \
-  < /tmp/homelab-repo.secret.yaml \
-  > platform/argocd/homelab-repo.sealedsecret.yaml
-
-rm /tmp/homelab-repo.secret.yaml ./homelab-deploy-key
-```
-
-Commit. ArgoCD discovers it and uses the deploy key for subsequent syncs.
-
-### 6.8 Add the namespaces Application
-
-`platform/namespaces/rookia.yaml`:
-
-```yaml
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: rookia
----
-apiVersion: v1
-kind: ResourceQuota
-metadata:
-  name: rookia-quota
-  namespace: rookia
-spec:
-  hard:
-    requests.cpu: "1"
-    requests.memory: "2Gi"
-    limits.cpu: "2"
-    limits.memory: "4Gi"
-```
-
-Plus a `platform/namespaces/app.yaml` Argo Application pointing at `platform/namespaces/` (raw manifest source).
+[`platform/namespaces/app.yaml`](platform/namespaces/app.yaml) applies `platform/namespaces/manifests/*.yaml`: one file per tenant with a `Namespace` + `ResourceQuota`. `prune: true`, so deleting a tenant's file deletes its namespace.
 
 **Verify:**
 
-- `kubectl -n argocd get application` shows `root`, `argocd`, `sealed-secrets`, `namespaces` — all `Synced` + `Healthy`.
-- `kubectl get ns rookia` exists with the ResourceQuota attached.
-- Edit `platform/argocd/values.yaml` (e.g. bump `server.resources.limits.memory` from 256Mi to 384Mi), commit, push. Within ~3 minutes ArgoCD rolls itself with no human intervention.
-- Port-forward still reaches the UI.
+- `kubectl -n argocd get application` shows `root`, `argocd`, `sealed-secrets`, `namespaces`, all `Synced` + `Healthy`.
+- Edit `platform/argocd/values.yaml` (e.g. bump a memory limit), commit, push. ArgoCD rolls itself with no human step.
 
 ---
 
-## Phase 7 — Cloudflare Tunnel via Helm + expose ArgoCD (~1 hr)
+## Phase 7 — Cloudflare Tunnel + expose ArgoCD (~1 hr)
 
-**Goal:** one shared tunnel that any tenant can attach a public hostname to (e.g. `argo.spaderlabs.com`, later `api-homelab.rookia.com`, `vault.spaderlabs.com`, etc.). Deployed via the official Cloudflare Helm chart, with the tunnel token stored as a SealedSecret from Phase 5. First public hostname exposes ArgoCD behind Cloudflare Access.
+**Goal:** one shared tunnel that every service attaches public hostnames to. The tunnel is *remotely managed*: hostname routing lives in the Cloudflare dashboard, the cluster only runs the connector. The token is a SealedSecret.
 
 ### 7.1 Create the tunnel in Cloudflare
 
-In Cloudflare → **Zero Trust → Networks → Tunnels → Create tunnel → Cloudflared**:
+Cloudflare → **Zero Trust → Networks → Tunnels → Create tunnel → Cloudflared**:
 
 - Name: `homelab`
-- Copy the install token shown after creation. (The token is what `cloudflared` uses to authenticate the connector; hostname routing is configured in the Cloudflare UI.)
+- Copy the connector token shown after creation.
 
-> One tunnel per cluster. Each tenant adds public hostnames to **this same tunnel**, not new tunnels.
+> One tunnel per cluster. Every service adds public hostnames to **this same tunnel**, never a new tunnel.
 
-### 7.2 Encrypt the tunnel token as a SealedSecret
+### 7.2 Seal the tunnel token
 
 ```bash
-kubectl create namespace cloudflared
 kubectl create secret generic tunnel-token \
   -n cloudflared \
-  --from-literal=token=<TOKEN> \
+  --from-literal=token='<TOKEN>' \
   --dry-run=client -o yaml \
   | kubeseal --cert pub-cert.pem -o yaml \
-  > platform/cloudflared/tunnel-token.sealedsecret.yaml
+  > platform/cloudflared/manifests/tunnel-token.sealedsecret.yaml
 ```
 
-Commit. Raw token never lands in git — only the sealed form.
+### 7.3 Connector Deployment
 
-### 7.3 Helm values
+`cloudflared` runs as a plain Deployment, not a Helm chart: [`platform/cloudflared/manifests/deployment.yaml`](platform/cloudflared/manifests/deployment.yaml).
 
-Using the official Cloudflare chart `cloudflare-tunnel-remote` (remotely-managed tunnel; hostnames configured in the CF dashboard).
+- 2 replicas, so a rolling restart never drops the tunnel.
+- Image pinned (`cloudflare/cloudflared:2026.10.5`) and `--no-autoupdate`. Bump the tag in git to upgrade.
+- `TUNNEL_TOKEN` from the `tunnel-token` Secret.
+- Metrics on `:2000`; liveness/readiness on `/ready`.
+- Non-root, read-only root filesystem, all capabilities dropped, requests + limits set.
 
-`platform/cloudflared/values.yaml`:
-
-```yaml
-cloudflare:
-  tunnel_token_secret:
-    name: tunnel-token
-    key: token
-
-replicaCount: 2                              # zero-downtime rollouts on a single node
-
-resources:
-  requests: { cpu: 25m,  memory: 32Mi }
-  limits:   { cpu: 200m, memory: 128Mi }
-```
-
-> Chart docs: <https://github.com/cloudflare/helm-charts/tree/main/charts/cloudflare-tunnel-remote>. Pin the chart version in `app.yaml`.
-
-### 7.4 Application manifest
-
-`platform/cloudflared/app.yaml`:
-
-```yaml
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: cloudflared
-  namespace: argocd
-  finalizers:
-    - resources-finalizer.argocd.argoproj.io
-spec:
-  project: default
-  sources:
-    - chart: cloudflare-tunnel-remote
-      repoURL: https://cloudflare.github.io/helm-charts
-      targetRevision: <pinned>
-      helm:
-        valueFiles:
-          - $values/platform/cloudflared/values.yaml
-    - repoURL: https://github.com/<you>/homelab.git
-      targetRevision: HEAD
-      ref: values
-      path: platform/cloudflared            # also sync the SealedSecret from this dir
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: cloudflared
-  syncPolicy:
-    automated: { selfHeal: true, prune: true }
-    syncOptions:
-      - ServerSideApply=true
-      - CreateNamespace=true
-```
-
-> Argo's multi-source support applies the Helm chart **and** the raw `tunnel-token.sealedsecret.yaml` (which has `namespace: cloudflared` set) in the same Application. The SealedSecret is decrypted by the Phase 5 controller before the Helm pods start.
-
-Push. Confirm ArgoCD syncs `cloudflared` Healthy:
+[`platform/cloudflared/app.yaml`](platform/cloudflared/app.yaml) is a single-source Application on `platform/cloudflared/manifests/` with `CreateNamespace=true`. Push, then:
 
 ```bash
 kubectl -n argocd get application cloudflared
 kubectl -n cloudflared get pods                  # 2 cloudflared pods Running
 ```
 
-In the Cloudflare dashboard, the tunnel should show **HEALTHY** with 2 connectors.
+The Cloudflare dashboard shows the tunnel as **HEALTHY** with 2 connectors.
 
-### 7.5 First public hostname: ArgoCD behind Cloudflare Access
+### 7.4 Public hostnames
 
-In the tunnel (Cloudflare dashboard) → **Public Hostname → Add public hostname**:
+In the tunnel → **Public Hostname → Add public hostname**. Each entry maps a hostname to an in-cluster Service URL of the form `http://<svc>.<namespace>.svc.cluster.local:<port>`. Infra entries:
 
-- **Subdomain:** `argo`
-- **Domain:** `spaderlabs.com`
-- **Service:** `http://argocd-server.argocd.svc.cluster.local:80`
+| Hostname | Service |
+| --- | --- |
+| `argo.spaderlabs.com` | `http://argocd-server.argocd.svc.cluster.local:80` |
+| `grafana.spaderlabs.com` | `http://observability-grafana.observability.svc.cluster.local:80` (Phase 9) |
 
-In Cloudflare → **Zero Trust → Access → Applications**, create a self-hosted application for `argo.spaderlabs.com`:
+Tenant hostnames follow the same pattern (Phase 13). Cloudflare creates the DNS CNAME automatically when the zone is on the same account. The catch-all rule returns `http_status:404`.
 
-- Policy: require login from your email address.
-- Optional: add a 2FA requirement.
+To list what the tunnel currently routes, read the last config the connector received:
 
-Browse to `https://argo.spaderlabs.com` — Cloudflare Access prompts first, then ArgoCD shows the login screen. Log in as `admin` with the password from 6.1.
+```bash
+kubectl -n cloudflared logs deploy/cloudflared | grep "Updated to new configuration" | tail -1
+```
+
+### 7.5 Cloudflare Access in front of ArgoCD
+
+Cloudflare → **Zero Trust → Access → Applications → Add → Self-hosted** for `argo.spaderlabs.com`:
+
+- Policy: **Allow**, include your email address.
+- Second policy on the same host, path `/api/webhook`: action **Bypass**, include **Everyone**. GitHub's webhook POSTs cannot pass an Access login. ArgoCD verifies them with the webhook secret instead.
+
+Browse to `https://argo.spaderlabs.com`: Cloudflare Access first, then the ArgoCD login with **Log in via GitHub**.
 
 ### 7.6 LAN-only services
 
-For services that should NOT be public (Pi-hole admin UI, Home Assistant, etc.), do not add a public hostname. Reach them via `kubectl port-forward` or set up Tailscale (optional Phase 14).
+Services that should not be public get no tunnel hostname. Reach them over Tailscale (Phase 8) or with `kubectl port-forward`.
 
 **Verify:**
 
-- `kubectl -n cloudflared get pods` — 2 Running, no CrashLoopBackOff.
-- Cloudflare tunnel status **HEALTHY**.
-- `curl -I https://argo.spaderlabs.com` — 200 OK, TLS valid (CF terminates), Access challenge appears in a browser.
-- Editing `platform/cloudflared/values.yaml` (e.g. bump `replicaCount` to 3 and back) rolls through ArgoCD with no manual steps.
+- `kubectl -n cloudflared get pods`: 2 Running, no CrashLoopBackOff.
+- `curl -sI https://argo.spaderlabs.com` → `302` to `*.cloudflareaccess.com`.
+- `curl -s -o /dev/null -w '%{http_code}' https://argo.spaderlabs.com/api/webhook` → `400` (reaches ArgoCD, not Access).
+- GitHub → repo → Webhooks → Recent deliveries show `200`.
 
 ---
 
-## Phase 8 — amd64 image build in CI (~1 hr)
+## Phase 8 — Tailscale on the host (~15 min)
 
-**Goal:** pushing to `main` of the Rookia monorepo publishes amd64 images to GHCR. Since the homelab is x86_64, no QEMU cross-compilation needed — native build is fast.
+**Goal:** reach `ssh`, `kubectl` and Postgres from anywhere without any public exposure. Tailscale runs on the **host**, not as a Kubernetes operator.
 
-### 8.1 Dockerfiles
-
-- [ ] Add (or audit) `apps/api/Dockerfile`. Multi-stage, base `oven/bun:1-slim`, install production deps, copy built `apps/api`.
-- [ ] Same for the worker. Reuse the API image with a different `CMD` if it imports the same `packages/core`.
-
-### 8.2 GitHub Actions workflow
-
-Create `.github/workflows/build-images.yaml`:
-
-```yaml
-name: build-images
-on:
-  push:
-    branches: [main]
-    paths:
-      - "apps/api/**"
-      - "apps/worker/**"
-      - "packages/core/**"
-permissions:
-  contents: read
-  packages: write
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: apps/api/Dockerfile
-          platforms: linux/amd64
-          push: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          tags: |
-            ghcr.io/<user>/rookia-api:${{ github.sha }}
-            ghcr.io/<user>/rookia-api:latest
-```
-
-### 8.3 Test pull on the homelab
+On the box:
 
 ```bash
-sudo k3s ctr image pull ghcr.io/<user>/rookia-api:latest
+curl -fsSL https://tailscale.com/install.sh | sh     # adds the tailscale apt repo
+sudo tailscale up --ssh
+tailscale ip -4                                       # → 100.107.122.69
 ```
 
-For private images, add an `imagePullSecret` in the `rookia` namespace.
+- Approve the device in the Tailscale admin console, and **disable key expiry** for `homelab` so it never drops off the tailnet.
+- `--ssh` enables Tailscale SSH: connections to port 22 on the Tailscale IP are authenticated by tailnet identity and ACLs instead of `authorized_keys`. SSH on the LAN IP still goes to OpenSSH, which stays the fallback if Tailscale is down. ufw allows everything on `tailscale0` (Phase 2.3).
+- The Tailscale IP is already in the k3s `tls-san` list (Phase 3.2) and in the Mac's kubeconfig (Phase 3.4).
 
-**Verify:** GHCR shows new amd64 manifests. `crictl pull` on the homelab succeeds.
+On the Mac (and phone), install Tailscale and sign in to the same tailnet.
+
+**Optional, not set up:** the Tailscale Kubernetes operator (exposes single Services on the tailnet with `tailscale.com/expose: "true"`), MagicDNS names, subnet routing for the rest of the LAN.
+
+**Verify:** from a network outside the LAN (phone hotspot) with Tailscale on: `ssh homelab true` and `kubectl get nodes` both work.
 
 ---
 
-## Phase 9 — Seal Rookia `.env` + deploy API (~1 hr)
+## Phase 9 — Observability (~2 hr)
 
-**Goal:** API reachable at `api-homelab.rookia.com`, healthy, hitting Neon. Runs in the `rookia` namespace, inside its ResourceQuota.
+**Goal:** metrics + logs in one place, light enough for a 16GB single-node box, with GitHub SSO. Stack:
 
-### 9.1 Seal the Rookia `.env`
+- **VictoriaMetrics k8s-stack** (chart `victoria-metrics-k8s-stack`): VM operator, VMSingle, vmagent, kube-state-metrics, node-exporter, Grafana. About 5–10× less RAM than kube-prometheus-stack.
+- **VictoriaLogs single** (chart `victoria-logs-single`): log database.
+- **Vector** as a DaemonSet: tails every pod's stdout/stderr and ships it to VictoriaLogs.
+- **Grafana with GitHub OAuth**: login only through GitHub, with a JMESPath role allowlist.
 
-```bash
-kubectl create secret generic api-env \
-  -n rookia \
-  --from-env-file=.env \
-  --dry-run=client -o yaml \
-  | kubeseal --cert pub-cert.pem -o yaml \
-  > tenants/rookia/manifests/sealed-env.yaml
-```
+Everything is under `platform/observability/` as **one ArgoCD Application** with four sources: two Helm charts, this repo as `$values`, and `manifests/` (with `directory.recurse: true` for the `dashboards/` subdirectory).
 
-Commit `sealed-env.yaml` only — never the raw `.env`.
-
-### 9.2 Manifests
-
-In `tenants/rookia/manifests/api/`:
-
-`deployment.yaml`:
-
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: api
-  namespace: rookia
-spec:
-  replicas: 1
-  selector:
-    matchLabels: { app: api }
-  template:
-    metadata:
-      labels: { app: api }
-    spec:
-      containers:
-        - name: api
-          image: ghcr.io/<user>/rookia-api:latest
-          ports:
-            - containerPort: 3000
-          envFrom:
-            - secretRef:
-                name: api-env
-          resources:
-            requests: { cpu: 100m, memory: 256Mi }
-            limits:   { cpu: 500m, memory: 512Mi }
-          livenessProbe:
-            httpGet: { path: /health, port: 3000 }
-          readinessProbe:
-            httpGet: { path: /health, port: 3000 }
-```
-
-`service.yaml`:
-
-```yaml
-apiVersion: v1
-kind: Service
-metadata:
-  name: api
-  namespace: rookia
-spec:
-  selector: { app: api }
-  ports:
-    - port: 80
-      targetPort: 3000
-```
-
-### 9.3 Wire to ArgoCD
-
-Update `tenants/rookia/app.yaml` to point at `tenants/rookia/manifests/`. Push.
-
-### 9.4 Public hostname
-
-In the Cloudflare tunnel, add public hostname:
-
-- **Hostname:** `api-homelab.rookia.com`
-- **Service:** `http://api.rookia.svc.cluster.local:80`
-
-**Verify:**
-
-```bash
-curl https://api-homelab.rookia.com/health      # 200
-kubectl -n rookia logs deploy/api               # successful Neon connection
-kubectl -n rookia describe resourcequota        # usage well under cap
-```
-
-Mobile app pointed at `api-homelab.rookia.com` round-trips a real auth request.
-
----
-
-## Phase 10 — Deploy pg-boss worker (~30 min)
-
-**Goal:** worker consuming jobs from Neon, gracefully shutting down on rollouts.
-
-### 10.1 Manifest
-
-In `tenants/rookia/manifests/worker/deployment.yaml`:
-
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: worker
-  namespace: rookia
-spec:
-  replicas: 1
-  selector:
-    matchLabels: { app: worker }
-  template:
-    metadata:
-      labels: { app: worker }
-    spec:
-      terminationGracePeriodSeconds: 60
-      containers:
-        - name: worker
-          image: ghcr.io/<user>/rookia-api:latest
-          command: ["bun", "run", "start:worker"]
-          envFrom:
-            - secretRef:
-                name: api-env
-          resources:
-            requests: { cpu: 100m, memory: 256Mi }
-            limits:   { cpu: 500m, memory: 512Mi }
-```
-
-No Service. Total of API + worker resources must stay under the `rookia` ResourceQuota.
-
-### 10.2 Sync
-
-The tenant Application from Phase 9 already covers this directory once `tenants/rookia/manifests/` is recursive. Push.
-
-**Verify:** Enqueue a known job → worker logs show pickup + completion. Rolling restart does not lose the in-flight job:
-
-```bash
-kubectl rollout restart deploy/worker -n rookia
-```
-
----
-
-## Phase 11 — Cutover from Railway (~1 hr + 48 hr observation)
-
-**Goal:** production traffic on the homelab, Railway off.
-
-### 11.1 Pre-flight
-
-API + worker green on homelab for 24h, no error spikes, Neon connection counts sane.
-
-### 11.2 Repoint clients
-
-- [ ] Vercel: update `apps/web` env `NEXT_PUBLIC_API_URL` to `https://api.rookia.com`.
-- [ ] Mobile app: update via OTA config flag if applicable.
-
-### 11.3 Switch DNS
-
-Switch Cloudflare DNS so `api.rookia.com` points at the tunnel hostname (or rename the tunnel hostname directly to `api.rookia.com`). MercadoPago webhook URL stays the same.
-
-### 11.4 Drain Railway
-
-Scale Railway services to 0 but **leave them** for 48h in case of rollback.
-
-### 11.5 Monitor
-
-```bash
-kubectl -n rookia logs -f deploy/api
-```
-
-Watch MP webhook deliveries (24h retry window forgives short blips) and error reports.
-
-### 11.6 Clean up after 48h
-
-Delete Railway services. Cancel the Railway plan if it was the only thing running.
-
-**Verify:** Real user registers, pays via MP, gets the confirmation email — full flow on the homelab.
-
----
-
-## Phase 12 — etcd backups (~30 min)
-
-**Goal:** cluster state recoverable if the NVMe dies.
-
-### 12.1 Enable scheduled snapshots
-
-Assumes `--cluster-init` from Phase 3. Edit `/etc/systemd/system/k3s.service` and append to the `ExecStart` line:
-
-```text
---etcd-snapshot-schedule-cron "0 */6 * * *" \
---etcd-snapshot-retention 12
-```
-
-### 12.2 Add S3-compatible offsite
-
-Cloudflare R2 or Backblaze B2. Append to the same `ExecStart`:
-
-```text
---etcd-s3 \
---etcd-s3-endpoint=<r2-endpoint> \
---etcd-s3-bucket=homelab-etcd \
---etcd-s3-access-key=<KEY> \
---etcd-s3-secret-key=<SECRET>
-```
-
-Reload and restart:
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl restart k3s
-```
-
-### 12.3 Document the restore
-
-```bash
-k3s server --cluster-reset --cluster-reset-restore-path=<snapshot>
-```
-
-### 12.4 Test the restore
-
-Test on a spare VM once. Untested backups don't exist.
-
-**Verify:**
-
-```bash
-ls /var/lib/rancher/k3s/server/db/snapshots/   # recent snapshots
-```
-
-R2 bucket shows uploads.
-
----
-
-## Phase 13 — Adding a new tenant (template, not blocking)
-
-Whenever you want to host a new home service (Pi-hole, Home Assistant, Vaultwarden, Uptime Kuma, Gitea, Immich, etc.), this is the recipe — no cluster-level changes needed.
-
-### 13.1 Repo skeleton
-
-In `homelab`, create:
-
-```text
-tenants/<name>/
-  app.yaml                 # Argo Application
-  manifests/
-    *.yaml                 # Deployment, Service, PVC, etc.
-    sealed-env.yaml        # SealedSecret if needed
-```
-
-### 13.2 Namespace + quota
-
-Add `platform/namespaces/<name>.yaml` with a Namespace and a ResourceQuota sized to the app.
-
-### 13.3 Workload rules
-
-- Set every workload's `namespace: <name>`.
-- Set explicit `resources.requests` and `resources.limits`.
-
-### 13.4 Storage
-
-If the app is **stateful**, add a PersistentVolumeClaim using the default `local-path` StorageClass:
-
-```yaml
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: <name>-data
-  namespace: <name>
-spec:
-  accessModes: [ReadWriteOnce]
-  resources:
-    requests:
-      storage: 10Gi
-```
-
-Data lives on NVMe; lost if the homelab dies and you don't have a backup of `/var/lib/rancher/k3s/storage/`.
-
-### 13.5 Networking
-
-- **Public:** add a Cloudflare Tunnel public hostname pointing at `http://<svc>.<name>.svc.cluster.local:<port>`. Add a Cloudflare Access policy if it should be private-but-remote.
-- **LAN-only:** skip the tunnel hostname. Reach via Tailscale (Phase 14) or `kubectl port-forward`.
-
-### 13.6 Sync
-
-Push. ArgoCD picks it up under the root app's recursive scan.
-
-**Verify:** New namespace exists, Argo Application Synced + Healthy, app reachable on its chosen ingress path.
-
----
-
-## Phase 14 — Tailscale for LAN-only services (~30 min, optional)
-
-**Goal:** reach `kubectl`, ArgoCD, Pi-hole admin UI, Home Assistant, etc. from anywhere without exposing them publicly.
-
-- [ ] Sign up for Tailscale (free for personal use, up to 100 devices).
-- [ ] Install the Tailscale Kubernetes operator via Helm or as an Argo Application — pick a hostname like `homelab`. Approve the device in the Tailscale admin UI.
-- [ ] Annotate any Service to expose it on the tailnet:
-
-```yaml
-metadata:
-  annotations:
-    tailscale.com/expose: "true"
-```
-
-Or use the operator's `Ingress` class.
-
-- [ ] Optional: enable **MagicDNS** so services are reachable as `<svc>.<tailnet>.ts.net`.
-- [ ] Optional: enable **subnet routing** to access the rest of the LAN (printers, etc.) through the homelab.
-
-**Verify:** From a phone on cellular with Tailscale on, `https://argo.<tailnet>.ts.net` (or whatever you exposed) loads the ArgoCD UI.
-
----
-
-## Phase 15 — Observability (~2 hr if it goes smoothly, more if it doesn't)
-
-**Goal:** metrics + logs in one place, lightweight enough not to drain a 16GB single-node box, GitHub-SSO'd. Stack:
-
-- **VictoriaMetrics k8s-stack** (chart `victoria-metrics-k8s-stack`) — VM operator, VMSingle, vmagent, kube-state-metrics, node-exporter, Grafana. Replaces kube-prometheus-stack at ~5–10× less RAM.
-- **VictoriaLogs single** (chart `victoria-logs-single`) — log database. Lighter than Loki, simpler operationally.
-- **Vector** as a DaemonSet — tails every pod's stdout/stderr, ships to VictoriaLogs via the JSON-line ingest endpoint.
-- **Grafana with GitHub OAuth** — no admin password form, login via GitHub only with a JMESPath role allowlist.
-
-Everything lives under `platform/observability/` as a **single ArgoCD Application** with multiple sources (two Helm charts + values + raw manifests).
-
-### 15.1 Repo layout
+### 9.1 Repo layout
 
 ```
 platform/observability/
-  app.yaml                        # Application — multi-source: 2 charts + $values + manifests
+  app.yaml                        # multi-source: 2 charts + $values + manifests (recurse)
   values.yaml                     # victoria-metrics-k8s-stack values
   values-vlogs.yaml               # victoria-logs-single values
   manifests/
     limitrange.yaml               # default container limits (operator sidecars need them)
     vector.yaml                   # Vector DaemonSet + RBAC + ConfigMap
-    grafana-github-oauth.sealedsecret.yaml   # OAuth client id + secret
+    grafana-github-oauth.sealedsecret.yaml
+    *.sealedsecret.yaml           # extra datasource credentials, if any
+    dashboards/*.yaml             # dashboards as labeled ConfigMaps
 platform/namespaces/manifests/observability.yaml   # Namespace + ResourceQuota
 ```
 
-### 15.2 GitHub OAuth app for Grafana SSO
+### 9.2 GitHub OAuth App for Grafana SSO
 
-1. https://github.com/settings/developers → **New OAuth App**.
-2. Homepage URL: `https://grafana.spaderlabs.com`. Authorization callback URL: `https://grafana.spaderlabs.com/login/github`.
-3. Generate client secret. Copy both values.
+1. GitHub → Settings → Developer settings → **OAuth Apps → New OAuth App**.
+2. Homepage URL: `https://grafana.spaderlabs.com`. Callback URL: `https://grafana.spaderlabs.com/login/github`.
+3. Generate a client secret.
 
-### 15.3 Seal the OAuth credentials
+### 9.3 Seal the OAuth credentials
 
 ```bash
 kubectl create secret generic grafana-github-oauth -n observability \
@@ -1394,37 +888,34 @@ kubectl create secret generic grafana-github-oauth -n observability \
   > platform/observability/manifests/grafana-github-oauth.sealedsecret.yaml
 ```
 
-Env-var-shaped keys are intentional — Grafana auto-binds `GF_AUTH_GITHUB_*` env vars to `[auth.github]` in `grafana.ini`, no extra wiring.
+The env-var-shaped keys are intentional: Grafana binds `GF_AUTH_GITHUB_*` env vars to `[auth.github]` with no extra wiring.
 
-### 15.4 Cloudflare hostname
+### 9.4 Cloudflare hostname
 
-In Cloudflare dashboard → **Zero Trust → Tunnels → homelab → Public Hostnames** → add `grafana.spaderlabs.com` pointing at `http://observability-grafana.observability.svc.cluster.local:80`.
+Add `grafana.spaderlabs.com` → `http://observability-grafana.observability.svc.cluster.local:80` to the tunnel (7.4).
 
-**Don't put a Cloudflare Access policy in front** — Grafana's GitHub OAuth callback (`/login/github`) needs to traverse cleanly. Access protection here would block the OAuth handshake. Access control is enforced at Grafana itself via `role_attribute_path` (only your GH login → `GrafanaAdmin`, anyone else → denied).
+**Do not put Cloudflare Access in front of Grafana.** Grafana's GitHub OAuth callback (`/login/github`) must pass through cleanly. Grafana enforces access itself with `role_attribute_path`: only your GitHub login gets `GrafanaAdmin`, everyone else gets `None`.
 
-### 15.5 Sync
+### 9.5 Sync + verify
 
 The root Application picks up `platform/observability/app.yaml` automatically.
 
-### 15.6 Verify
-
 ```bash
-# All pods Running
-kubectl -n observability get pods
+kubectl -n observability get pods        # all Running
 
-# Datasources provisioned at startup (subPath bind-mount, no race)
 kubectl -n observability logs deploy/observability-grafana -c grafana 2>&1 \
-  | grep "inserting datasource"
-# Expect: VictoriaMetrics + VictoriaLogs
-
-# Hit https://grafana.spaderlabs.com → "Sign in with GitHub"
+  | grep "inserting datasource"           # → VictoriaMetrics + VictoriaLogs
 ```
 
-After a few scrape cycles, **Dashboards → Browse → Kubernetes / Compute Resources / Cluster** populates.
+`https://grafana.spaderlabs.com` shows **Sign in with GitHub**. After a few scrape cycles, **Dashboards → Kubernetes / Compute Resources / Cluster** fills in.
 
-### 15.7 Adding friends as Viewers
+### 9.6 Dashboards as code
 
-Edit `platform/observability/values.yaml`, append to the `contains([], login)` array:
+Each dashboard is a ConfigMap in `manifests/dashboards/` with the Grafana sidecar's dashboard label. Edit the JSON, push, and the sidecar reloads it. Do not edit dashboards in the UI without exporting them back to git: the next sync overwrites UI changes.
+
+### 9.7 Adding Viewers
+
+Edit `platform/observability/values.yaml`:
 
 ```yaml
 role_attribute_path: >-
@@ -1432,45 +923,355 @@ role_attribute_path: >-
   (contains(['alice','bob'], login) && 'Viewer' || 'None')
 ```
 
-Push → ArgoCD syncs → Grafana redeploys → they sign in via GitHub, get read-only.
+Push. ArgoCD syncs, Grafana redeploys, they sign in with GitHub and get read-only access.
+
+---
+
+## Phase 10 — ArgoCD Image Updater (~30 min)
+
+**Goal:** a new semver tag on GHCR becomes a git commit in this repo, and ArgoCD rolls it out. No manual tag bumps, and git stays the source of truth.
+
+How it works:
+
+1. [`platform/argocd-image-updater/`](platform/argocd-image-updater/) installs chart `argocd-image-updater` **0.14.0** (the annotation-based 0.x line; 1.x replaces annotations with an `ImageUpdater` CRD and would need every tenant rewired).
+2. It reads annotations on ArgoCD `Application` CRs directly through the Kubernetes API (`applicationsAPIKind: kubernetes`) and polls GHCR every 5 minutes.
+3. When a tag that matches the allow-list is newer, it commits the bump into the tenant's `kustomization.yaml` `images:` block as `argocd-image-updater <argocd-image-updater@spaderlabs.com>`, with a `chore(<app>): bump image tag` message.
+4. The commit triggers the webhook; ArgoCD syncs.
+
+Credentials, without duplicate secrets:
+
+- **Git push:** reuses ArgoCD's GitHub App Secret (`argocd/github-app-homelab`, Phase 6.6), which is why the App needs **Contents: Read and write**.
+- **Registry:** reads each tenant's own `ghcr-pull` Secret.
+- [`manifests/rbac.yaml`](platform/argocd-image-updater/manifests/rbac.yaml) grants the updater ServiceAccount `get` on exactly those Secrets (one Role + RoleBinding per namespace, pinned with `resourceNames`). **Each new tenant that uses the updater needs its own Role + RoleBinding pair here.**
+
+The `argocd-image-updater` namespace and quota come from `platform/namespaces/manifests/argocd-image-updater.yaml`.
+
+Per-Application annotations are in Phase 13.5.
+
+**Verify:**
+
+```bash
+kubectl -n argocd-image-updater logs deploy/argocd-image-updater | tail -20
+# → "Processing results: applications=N images_considered=M ... errors=0"
+git log --author=argocd-image-updater --oneline | head
+```
+
+Because the updater pushes to `main`, always `git pull --rebase` before you push changes to this repo.
+
+---
+
+## Phase 11 — Host Postgres 17 + pgBackRest (~1.5 hr)
+
+**Goal:** one Postgres cluster on the host for tenants that want a local database, with continuous WAL archiving and weekly full backups to Cloudflare R2. It runs outside k3s on purpose: simpler upgrades and backups, and no database data on a node-local PVC.
+
+Config files are in [`host/postgres/`](host/postgres/) and are symlinked into place. See [`host/README.md`](host/README.md) for the full file map.
+
+### 11.1 Install from the PGDG apt repo
+
+Ubuntu's own archive ships a different major version, so use the PostgreSQL project repo:
+
+```bash
+sudo apt install -y postgresql-common
+sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh     # adds /etc/apt/sources.list.d/pgdg.list
+sudo apt install -y postgresql-17 pgbackrest
+pg_lsclusters                                                      # → 17 main 5432 online
+```
+
+The package creates cluster `17/main` and the `postgresql@17-main` unit.
+
+### 11.2 Link the config
+
+`pg_hba.conf` already exists, so move it aside first (never `ln -sf` over a real file):
+
+```bash
+sudo ln -s /opt/homelab/host/postgres/conf.d/00-homelab.conf /etc/postgresql/17/main/conf.d/00-homelab.conf
+sudo mv /etc/postgresql/17/main/pg_hba.conf /etc/postgresql/17/main/pg_hba.conf.orig
+sudo ln -s /opt/homelab/host/postgres/pg_hba.conf /etc/postgresql/17/main/pg_hba.conf
+```
+
+What they set:
+
+- `00-homelab.conf`: `listen_addresses = '*'`, `scram-sha-256`, memory sized for a host shared with k3s, slow-query logging, `archive_mode = on` with `archive_command = 'pgbackrest --stanza=main archive-push %p'`.
+- `pg_hba.conf`: peer auth on the local socket, `scram-sha-256` from loopback, Tailscale (`100.64.0.0/10`), LAN (`192.168.0.0/16`) and the k3s pod CIDR (`10.42.0.0/16`). Everything else is rejected.
+
+Hold the restart until pgBackRest is configured (11.4): with `archive_mode = on` and no stanza, WAL archiving fails and WAL files pile up.
+
+### 11.3 Firewall
+
+```bash
+sudo ufw allow from 192.168.0.0/16 to any port 5432 proto tcp comment 'postgres - LAN'
+sudo ufw allow from 10.42.0.0/16  to any port 5432 proto tcp comment 'postgres - k3s pods'
+```
+
+Tailscale access is already covered by the `tailscale0` rule.
+
+### 11.4 pgBackRest to R2
+
+1. Cloudflare → R2 → create a bucket. Create an R2 API token with **Object Read & Write** scoped to that bucket.
+2. Install the config from the example and fill the placeholders (bucket, account endpoint, key, secret):
+
+```bash
+sudo install -d -o postgres -g postgres -m 0750 /etc/pgbackrest /var/log/pgbackrest /var/lib/pgbackrest
+sudo cp /opt/homelab/host/postgres/pgbackrest.conf.example /etc/pgbackrest/pgbackrest.conf
+sudoedit /etc/pgbackrest/pgbackrest.conf
+sudo chown postgres:postgres /etc/pgbackrest/pgbackrest.conf
+sudo chmod 0640 /etc/pgbackrest/pgbackrest.conf
+```
+
+3. Restart Postgres to load the config, then create the stanza and check archiving:
+
+```bash
+sudo systemctl restart postgresql@17-main
+sudo -u postgres pgbackrest --stanza=main stanza-create
+sudo -u postgres pgbackrest --stanza=main check        # forces a WAL switch and confirms it reached R2
+```
+
+4. Link the systemd units and enable the weekly full backup (Sundays 02:00 UTC):
+
+```bash
+sudo ln -s /opt/homelab/host/postgres/systemd/pgbackrest@.service    /etc/systemd/system/pgbackrest@.service
+sudo ln -s /opt/homelab/host/postgres/systemd/pgbackrest@full.timer  /etc/systemd/system/pgbackrest@full.timer
+sudo systemctl daemon-reload
+sudo systemctl enable --now pgbackrest@full.timer
+sudo systemctl start pgbackrest@full.service             # first full backup now
+```
+
+Restore (into a stopped, empty or stale data directory):
+
+```bash
+sudo systemctl stop postgresql@17-main
+sudo -u postgres pgbackrest --stanza=main --delta restore     # add --type=time --target="<ts>" for PITR
+sudo systemctl start postgresql@17-main
+```
+
+### 11.5 Per-tenant databases
+
+One login role per database, owner of that database, with `CONNECT` revoked from `PUBLIC` so tenants cannot see each other. Keep the provisioning SQL in `host/postgres/provision-<tenant>.sql` and run it once with passwords passed as psql variables from 1Password. See [`host/postgres/provision-nestapp.sql`](host/postgres/provision-nestapp.sql) for the template.
+
+Pods connect to the **node LAN IP**: `postgres://<role>:<pw>@192.168.68.106:5432/<db>`. Pod traffic to the node IP is allowed by the `10.42.0.0/16` ufw and `pg_hba.conf` rules. Do not use the Tailscale IP from pods: the pod network does not route to it.
+
+**Verify:**
+
+```bash
+sudo -u postgres psql -Atc "select datname from pg_database where not datistemplate"
+sudo -u postgres pgbackrest --stanza=main info      # status: ok, at least one full backup
+systemctl list-timers pgbackrest@full.timer
+```
+
+---
+
+## Phase 12 — etcd backups (~30 min)
+
+**Goal:** cluster state recoverable if the NVMe dies.
+
+### 12.1 Local snapshots (in place)
+
+With `cluster-init: true`, k3s takes etcd snapshots on its default schedule: **every 12 hours (00:00 and 12:00 UTC), keeping the last 5**, in `/var/lib/rancher/k3s/server/db/snapshots/`. No config was needed. To change the schedule, add to [`host/k3s/config.yaml`](host/k3s/config.yaml) and restart k3s:
+
+```yaml
+etcd-snapshot-schedule-cron: "0 */6 * * *"
+etcd-snapshot-retention: 12
+```
+
+### 12.2 S3-compatible offsite (pending)
+
+Use Cloudflare R2 (a separate bucket from pgBackRest). The S3 credentials must **not** go in the repo. k3s merges every `*.yaml` in `/etc/rancher/k3s/config.yaml.d/` after `config.yaml`, so put them in a root-only file there:
+
+```bash
+sudo install -d -m 0700 /etc/rancher/k3s/config.yaml.d
+sudo tee /etc/rancher/k3s/config.yaml.d/90-secrets.yaml >/dev/null <<'EOF'
+etcd-s3: true
+etcd-s3-endpoint: <account-id>.r2.cloudflarestorage.com
+etcd-s3-bucket: homelab-etcd
+etcd-s3-region: auto
+etcd-s3-access-key: <KEY>
+etcd-s3-secret-key: <SECRET>
+EOF
+sudo chmod 0600 /etc/rancher/k3s/config.yaml.d/90-secrets.yaml
+sudo systemctl restart k3s
+```
+
+### 12.3 Restore
+
+```bash
+sudo systemctl stop k3s
+sudo k3s server --cluster-reset --cluster-reset-restore-path=<snapshot-path-or-name>
+sudo systemctl start k3s
+```
+
+A restore brings back cluster state (including the Sealed Secrets keys stored in etcd). PVC data and host Postgres are separate (Phase 11, Followups).
+
+### 12.4 Test the restore
+
+Test on a spare VM once. An untested backup is not a backup.
+
+**Verify:**
+
+```bash
+sudo k3s etcd-snapshot ls        # recent snapshots, local and (once 12.2 is done) s3
+```
+
+---
+
+## Phase 13 — Adding a new tenant (reference)
+
+The recipe for any new app. No cluster-level changes are needed beyond the namespace file and, if it uses the image updater, one RBAC entry.
+
+### 13.1 Build images in CI
+
+In the app's own repo, a GitHub Actions workflow builds and pushes to GHCR:
+
+- `platforms: linux/amd64` only. The box is x86_64; no QEMU or multi-arch.
+- Tag releases as plain semver `X.Y.Z` (that is what the image updater allow-list matches). Separate images (e.g. api / worker) can have independent versions.
+- Workflow permissions: `packages: write`; log in with `GITHUB_TOKEN`.
+
+### 13.2 Namespace + quota
+
+Add `platform/namespaces/manifests/<name>.yaml` with a `Namespace` and a `ResourceQuota` sized for the app. Size `limits` for a rolling-update surge (2× the biggest Deployment) plus a migration Job running at the same time.
+
+### 13.3 Secrets
+
+```bash
+# App env (plaintext stays at tenants/<name>/.env on the Mac, gitignored)
+kubectl create secret generic <name>-env -n <name> \
+  --from-env-file=tenants/<name>/.env --dry-run=client -o yaml \
+  | kubeseal --cert pub-cert.pem -o yaml > tenants/<name>/manifests/sealed-env.yaml
+
+# GHCR pull secret (a GitHub PAT with read:packages)
+kubectl create secret docker-registry ghcr-pull -n <name> \
+  --docker-server=ghcr.io --docker-username=everspader --docker-password='<PAT>' \
+  --dry-run=client -o yaml \
+  | kubeseal --cert pub-cert.pem -o yaml > tenants/<name>/manifests/sealed-ghcr-pull.yaml
+```
+
+Pods do not restart when a Secret changes. After a re-seal: `kubectl rollout restart deploy/<name> -n <tenant>`.
+
+If the app needs a database on the host Postgres, provision it first (Phase 11.5).
+
+### 13.4 Manifests
+
+```text
+tenants/<name>/
+  app.yaml
+  manifests/
+    kustomization.yaml       # namespace, resources, images: (tags live only here)
+    sealed-env.yaml
+    sealed-ghcr-pull.yaml
+    api/
+      deployment.yaml
+      service.yaml
+      migrate-job.yaml       # optional: DB migrations
+    worker/
+      deployment.yaml        # optional
+```
+
+Workload rules:
+
+- `namespace: <name>` on everything; never `default`.
+- `resources.requests` **and** `resources.limits` on every container, including Jobs.
+- `imagePullSecrets: [{ name: ghcr-pull }]` on every pod spec.
+- `revisionHistoryLimit: 3` on Deployments.
+- Workers that process jobs: `terminationGracePeriodSeconds: 60` so a rollout does not kill in-flight work.
+- Image references in manifests use the bare image name; the tag comes from `kustomization.yaml` `images:`.
+
+Migrations: run them as a Job with `argocd.argoproj.io/hook: Sync`, `hook-delete-policy: BeforeHookCreation` and `sync-wave: "5"`, with the Deployments at `sync-wave: "10"`. A `PreSync` hook also works once the tenant exists, but it fails on the **first** sync because it runs before the SealedSecrets are applied (see Key traps).
+
+Stateful apps: add a PVC on the default `local-path` StorageClass. The data lives on the NVMe and is not backed up yet (Followups).
+
+### 13.5 `app.yaml`
+
+Single source on `tenants/<name>/manifests`, `selfHeal: true`, `ServerSideApply=true`. Opt in to the image updater with annotations:
+
+```yaml
+metadata:
+  annotations:
+    argocd-image-updater.argoproj.io/image-list: <alias>=ghcr.io/everspader/<image>
+    argocd-image-updater.argoproj.io/<alias>.update-strategy: semver
+    argocd-image-updater.argoproj.io/<alias>.allow-tags: 'regexp:^\d+\.\d+\.\d+$'
+    argocd-image-updater.argoproj.io/<alias>.pull-secret: pullsecret:<name>/ghcr-pull
+    argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/github-app-homelab
+    argocd-image-updater.argoproj.io/git-branch: main
+    argocd-image-updater.argoproj.io/write-back-target: kustomization
+```
+
+Then add a Role + RoleBinding for `<name>/ghcr-pull` in [`platform/argocd-image-updater/manifests/rbac.yaml`](platform/argocd-image-updater/manifests/rbac.yaml).
+
+### 13.6 Networking
+
+- **Public:** add a tunnel public hostname → `http://<svc>.<name>.svc.cluster.local:<port>` (Phase 7.4). Add a Cloudflare Access policy if it should be private-but-remote; bypass any webhook or OAuth callback paths.
+- **Private:** no hostname. Reach it with `kubectl port-forward`, over Tailscale, or from the LAN.
+
+### 13.7 Sync
+
+Push. The root Application picks up `tenants/<name>/app.yaml`.
+
+**Verify:** namespace exists, Application `Synced` + `Healthy`, `kubectl -n <name> describe resourcequota` well under the caps, app reachable on its hostname.
+
+---
+
+## Phase 14 — Hermes agent (host-level)
+
+"Adolf" is a [Hermes agent](https://github.com/NousResearch/hermes-agent) that operates the homelab and acts as a personal assistant over Telegram. It runs on the host as a sandboxed systemd service under a dedicated `hermes` system user, **not** in k3s.
+
+Tracked config is in [`host/hermes/`](host/hermes/): the systemd unit, the `hermes` CLI wrapper and a sudoers fragment. Runtime state (`.env`, `config.yaml`, sessions, skills) lives in `/var/lib/hermes/.hermes/`, outside the repo.
+
+Install outline:
+
+1. Create the `hermes` system user and `/var/lib/hermes` (owned `hermes:hermes`, 0750). Install Hermes into `/var/lib/hermes`.
+2. Give it repo write access: `sudo setfacl -R -m u:hermes:rwX /opt/homelab && sudo setfacl -R -d -m u:hermes:rwX /opt/homelab`, plus its own GitHub deploy key with write access. It commits as `Adolf <adolf@spaderlabs.com>`.
+3. Link the unit and the wrapper, install the sudoers fragment (copied, not linked), then start it. Exact commands are in [`host/README.md`](host/README.md).
+
+```bash
+sudo systemctl daemon-reload && sudo systemctl enable --now hermes
+sudo systemctl reload hermes          # after editing /var/lib/hermes/.hermes/config.yaml (SIGUSR1)
+```
+
+Capability decisions (cluster-admin through the 0644 kubeconfig, repo write, read-only DB access) and their trade-offs are recorded in [`CLAUDE.md`](CLAUDE.md#hermes-adolf--host-level-agent).
+
+**Verify:** `systemctl is-active hermes` → `active`; the agent answers on Telegram.
 
 ---
 
 ## Optional follow-ups (not blocking)
 
-- **Uptime Kuma** in `platform/uptime-kuma/` monitoring all tenants' public hostnames.
-- **Renovate** or **Dependabot** on the `homelab` repo for image tag bumps.
-- **Small UPS** (CyberPower CP900AVR or APC BE600) — NucBox idle ~10-15W, load ~30-40W. Half-decent UPS gives 30-60 min runtime, plenty for clean shutdown on power blips.
-- **Restic / kopia** backing up `/var/lib/rancher/k3s/storage/` (PVC data) to Cloudflare R2 or Backblaze B2 — etcd snapshots from Phase 12 only cover cluster state, not stateful app data.
-- **Second NVMe** (if NucBox has a free M.2 slot) — separate `/var/lib/rancher` from root, easier disk replacement.
-- **Candidate tenants** (each is its own future Phase 13 instance): Pi-hole or AdGuard Home (DNS adblock — needs LAN UDP/53), Home Assistant, Vaultwarden, Immich (photos), Jellyfin (media), Gitea or Forgejo, Nextcloud, Linkding (bookmarks).
+- **Uptime Kuma** (or similar) monitoring all public hostnames.
+- **Renovate** on the `homelab` repo for Helm chart and `cloudflared` image bumps (Image Updater only covers tenant images).
+- **Small UPS** (CyberPower CP900AVR or APC BE600). The NucBox idles at ~10–15W and loads at ~30–40W; a basic UPS gives 30–60 min, enough for a clean shutdown.
+- **Second NVMe** (if there is a free M.2 slot): separate `/var/lib/rancher` and `/var/lib/postgresql` from root, for easier disk replacement.
+- **Candidate tenants:** Pi-hole or AdGuard Home (needs LAN UDP/53), Home Assistant, Vaultwarden, Immich, Jellyfin, Forgejo, Linkding.
 
 ---
 
 ## Key traps (do not skip)
 
-- ArgoCD + Sealed Secrets + Cloudflared each have a chicken-and-egg: bootstrap once by hand, then let them self-manage. Install order matters — Sealed Secrets first (Phase 5), then ArgoCD (Phase 6), then Cloudflared (Phase 7, with its token already sealed).
-- pg-boss worker absolutely needs `terminationGracePeriodSeconds: 60` — without it, rolling restarts will drop jobs mid-flight.
-- MercadoPago retries webhooks for ~24h. Short homelab downtime is recoverable; 48h+ is not.
-- **Always set `resources.requests` AND `limits` on every workload.** Without limits, one tenant with a memory leak takes down the whole node — including Rookia.
-- **Always deploy into a tenant namespace, never `default`.** `default` has no quota; mistakes there can starve everything else.
-- **Back up the Sealed Secrets controller key offline.** Without it, `homelab` is useless on a fresh cluster — every secret has to be re-encrypted by hand.
-- **Pi-hole / AdGuard on the same homelab as DNS = single point of failure for the whole house.** Keep a fallback DNS in your router config.
-- **`local-path-provisioner` PVCs are node-local.** Single-node is fine; the moment you add a second node, stateful pods can no longer be rescheduled. Plan a migration to Longhorn (or NFS) before adding nodes.
-- **Cloudflare Tunnel is one shared resource.** Don't put public Rookia + a sketchy self-hosted experiment on the same hostname pattern. Use Cloudflare Access for anything not meant to be on the public internet.
-- **BIOS "Restore on AC Power Loss" must be enabled.** Otherwise an outage = manual power button press to recover.
-- **NucBox fans get loud under sustained load.** Place it somewhere the noise doesn't matter, or undervolt the CPU in BIOS if needed.
-- **Don't put `PreSync` hooks in an Application that owns its own SealedSecrets.** PreSync runs *before* the Sync phase that applies the secrets, so the hook pod can't pull its image (no `imagePullSecret` yet) or read its env (no `envFrom` Secret yet). Use a `Sync` hook with explicit sync-waves instead — secrets land at wave 0, the hook runs at wave 5, app Deployments roll at wave 10. The 3-app pattern (separate "shared" Application for secrets + per-service apps) hides this trap because the secret-bearing app syncs first; the moment you consolidate, it surfaces.
-- **Splitting one tenant into multiple ArgoCD Applications is over-engineering at solo / homelab scale.** "Independent rollback" is a team-scale feature, not a one-person feature; runtime decoupling (e.g. api availability vs worker availability) comes from separate Deployments, not separate Applications. Default to one Application per tenant with services as `manifests/<service>/` subdirs. Re-split only when a service has a genuinely different release cadence or owner.
-- **Stripping ArgoCD Application finalizers + deleting Apps does not always orphan resources cleanly.** During a refactor that swaps Applications, the old Apps' cascade-delete can race the new App's create, leaving the cluster temporarily without secrets/Deployments. Apply critical Secrets manually (`kubectl apply -f`) immediately after the swap to bridge the gap, then let ArgoCD adopt them.
+- ArgoCD, Sealed Secrets and cloudflared each have a chicken-and-egg problem: bootstrap once by hand, then let them self-manage. Order matters: Sealed Secrets (Phase 5), then ArgoCD (Phase 6), then cloudflared (Phase 7, token already sealed).
+- **Back up the Sealed Secrets controller key offline, and re-export after each 30-day key rotation.** Without it, every SealedSecret in the repo is useless on a fresh cluster.
+- **Always set `resources.requests` AND `limits` on every container.** Quota'd namespaces reject pods without them, and a pod without limits can take down the whole node.
+- **Always deploy into a tenant namespace, never `default`.** `default` has no quota.
+- **Do not `ln -sf` host config into place.** It silently replaces real files (e.g. the stock `pg_hba.conf`). Check with `ls -la`, move the original aside, then `ln -s`.
+- **`sudo` rejects symlinked sudoers fragments.** Install them as root-owned 0440 copies (see `host/README.md`).
+- **Host Postgres with `archive_mode = on` and a broken pgBackRest config fills the disk with WAL.** Run `pgbackrest check` after every change to `pgbackrest.conf` or the R2 token.
+- **Pods reach host Postgres on the node LAN IP, not the Tailscale IP.** Both ufw and `pg_hba.conf` must allow `10.42.0.0/16`.
+- **The Image Updater pushes to `main`.** Pull with rebase before pushing, or your push is rejected.
+- **`kubectl` from the Mac goes over Tailscale.** If it hangs, Tailscale on the Mac is probably stopped.
+- **Workers need `terminationGracePeriodSeconds: 60`** (or longer than the longest job), or rolling restarts drop jobs mid-flight.
+- **`local-path-provisioner` PVCs are node-local.** Fine on one node. Before adding a node, plan a migration to Longhorn or NFS.
+- **Cloudflare Tunnel is one shared resource.** Use Cloudflare Access for anything not meant for the public internet, and bypass only the specific webhook/callback paths that need it.
+- **BIOS "Restore on AC Power Loss" must be enabled.** Otherwise an outage needs a manual power-button press.
+- **NucBox fans get loud under sustained load.** Place it where noise does not matter, or undervolt in BIOS.
+- **Do not use `PreSync` hooks in an Application that owns its own SealedSecrets** for a brand-new tenant. PreSync runs *before* the Sync phase applies the secrets, so on the first sync the hook pod has no `imagePullSecret` and no env Secret. Use a `Sync` hook with sync-waves: secrets at wave 0, migrate Job at wave 5, Deployments at wave 10.
+- **Do not split one tenant into several ArgoCD Applications.** Independent rollback is a team-scale feature. Default to one Application per tenant with services as `manifests/<service>/` subdirectories.
+- **Stripping Application finalizers + deleting Apps does not always orphan resources cleanly.** During a refactor that swaps Applications, the old App's cascade-delete can race the new App's create and leave the cluster without Secrets/Deployments for a moment. Apply critical Secrets by hand (`kubectl apply -f`) right after the swap, then let ArgoCD adopt them.
+- **ArgoCD excludes `EndpointSlice` from sync.** To point a Service at something outside the cluster, use a selector-less Service with a v1 `Endpoints` object.
 
 ### Observability-specific traps
 
-- **The VictoriaMetrics chart's `global.cluster.dnsDomain` defaults to `cluster.local.` (with a trailing dot — DNS-canonical absolute-FQDN form).** The dot propagates into every URL the chart generates, e.g. `http://vmsingle...svc.cluster.local.:8428`. **Grafana 13's URL parser rejects this form silently** — no log line, no error, the entire datasource provisioning file is dropped. UI shows zero datasources even though the file is on disk. K3s uses plain `cluster.local` — override `global.cluster.dnsDomain: cluster.local` in values.yaml. Burned half a day on this.
-- **The VM operator's prometheus-converter watches `PodMonitor` / `ServiceMonitor` CRDs by default.** Without prometheus-operator installed, those CRDs don't exist and the operator's informer cache hangs forever; pod crashloops with `failed to wait for podmonitor caches to sync`. Set `victoria-metrics-operator.operator.disable_prometheus_converter: true` and use VM-native CRDs (VMServiceScrape / VMPodScrape / VMRule). Re-enable once you actually want third-party charts' ServiceMonitor objects auto-converted.
-- **k3s bundles kube-controller-manager / kube-scheduler / etcd into one binary.** Leaving the chart's per-component scrapers enabled creates Services that find no endpoints — *and* the auto-generated controller-manager Service name comes out at 64 chars (one over the 63-char DNS label limit), blocking the sync entirely. Disable `kubeControllerManager / kubeScheduler / kubeEtcd` in values.yaml; keep `kubeApiServer` and `kubelet` (k3s exposes those).
-- **`ResourceQuota` requires every container to declare `limits.cpu` and `limits.memory`.** Operator-injected sidecars (vmagent's `config-init` and `config-reloader`) ship without explicit limits and get rejected at admission with `must specify limits.cpu for: config-init,config-reloader`. Pair every quota'd namespace with a `LimitRange` that supplies sensible defaults — see `platform/observability/manifests/limitrange.yaml`.
-- **Grafana persistence + `local-path-provisioner` (RWO) is incompatible with rolling updates.** Two pods can't share the PVC, so a `RollingUpdate` deadlocks at 1+1 replicas AND doubles the memory budget while both pods exist. Use `deploymentStrategy.type: Recreate` — accept ~30s of downtime in exchange for a predictable rollout. Or disable persistence entirely if everything important is config-as-code (datasources via values, dashboards as labeled ConfigMaps).
-- **Grafana datasource provisioning: prefer fully-static `grafana.datasources` over the sidecar-driven path.** The sidecar mode has a startup race — Grafana's provisioning module reads the directory once at boot, the sidecar's emptyDir is empty until the sidecar finishes writing, and the reload API that would re-trigger a scan requires admin auth (which mismatches if you ever ran `grafana-cli admin reset-admin-password`). The static path mounts the file via subPath bind directly into `/etc/grafana/provisioning/datasources/` — guaranteed to exist before Grafana boots, no race. Cost: no dynamic datasource updates, but you change those rarely.
-- **Default `revisionHistoryLimit` is 10.** Six redeploys leaves six dead ReplicaSets sitting around forever. Set `revisionHistoryLimit: 3` in values for every chart that exposes it (Grafana, kube-state-metrics, node-exporter), and on every raw Deployment / DaemonSet / StatefulSet you commit. ArgoCD chart already defaults to 3 — most others don't.
-- **Don't put Cloudflare Access in front of a service that does its own OAuth callback** (Grafana with GitHub OAuth in our case). The callback path (`/login/github`) needs to traverse cleanly, and Access intercepts every request. Either remove Access for that hostname (rely on the app's own auth) or add a path-specific bypass for the callback. Easiest at homelab scale: skip Access on Grafana, let `role_attribute_path` enforce who's allowed.
+- **The VictoriaMetrics chart's `global.cluster.dnsDomain` defaults to `cluster.local.` (trailing dot).** The dot ends up in every generated URL, and **Grafana 13's URL parser silently drops the whole datasource provisioning file**. Override `global.cluster.dnsDomain: cluster.local`.
+- **The VM operator's prometheus-converter watches `PodMonitor` / `ServiceMonitor` CRDs by default.** Without prometheus-operator those CRDs do not exist and the operator crashloops with `failed to wait for podmonitor caches to sync`. Set `victoria-metrics-operator.operator.disable_prometheus_converter: true` and use VM-native CRDs.
+- **k3s bundles kube-controller-manager / kube-scheduler / etcd into one binary.** Their scrapers find no endpoints, and the generated controller-manager Service name is 64 chars (over the 63-char limit), which blocks the sync. Disable `kubeControllerManager / kubeScheduler / kubeEtcd`; keep `kubeApiServer` and `kubelet`.
+- **`ResourceQuota` requires `limits.cpu` and `limits.memory` on every container**, including operator-injected sidecars (`config-init`, `config-reloader`). Pair every quota'd namespace with a `LimitRange` that supplies defaults (see `platform/observability/manifests/limitrange.yaml`).
+- **Grafana persistence + `local-path` (RWO) deadlocks rolling updates.** Use `deploymentStrategy.type: Recreate`, or disable persistence if everything is config-as-code.
+- **Prefer static `grafana.datasources` over the sidecar path for datasources.** The sidecar has a startup race; the static path mounts the file before Grafana boots.
+- **Default `revisionHistoryLimit` is 10.** Set it to 3 on every chart that exposes it and on every raw Deployment / DaemonSet / StatefulSet.
+- **ArgoCD Applications with subdirectories need `directory.recurse: true`.** Without it, ArgoCD silently skips the subdirectory (e.g. `manifests/dashboards/`).
+- **Do not put Cloudflare Access in front of a service that does its own OAuth callback** (Grafana). Either skip Access for that hostname or add a path-specific bypass.

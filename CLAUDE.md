@@ -16,14 +16,17 @@ The full step-by-step build plan lives in [SETUP.md](SETUP.md). Treat it as the 
 bootstrap/          One-shot manifests applied by hand (root-app.yaml)
 platform/           Cluster-wide infra. One subdir == one ArgoCD Application.
   sealed-secrets/   Bitnami sealed-secrets controller (Helm). Installed first.
-  argocd/           ArgoCD self-managing itself (Helm + SealedSecret admin pw)
-  cloudflared/      Shared Cloudflare Tunnel (Helm, SealedSecret tunnel token)
-  namespaces/       Namespace + ResourceQuota per tenant
-tenants/            One subdir per logical app. Each has app.yaml + manifests/
-  rookia/           First tenant: api Deployment (images on GHCR). External Supabase Postgres; async jobs via QStash — no in-cluster worker.
+  argocd/           ArgoCD self-managing itself (Helm + SealedSecrets: argocd-secret, GitHub App repo-creds)
+  cloudflared/      Shared Cloudflare Tunnel (raw Deployment, SealedSecret tunnel token)
+  namespaces/       Namespace + ResourceQuota per tenant (manifests/<tenant>.yaml)
+  observability/    VictoriaMetrics k8s-stack + VictoriaLogs (Helm) + Vector + dashboards
+  argocd-image-updater/  Bumps tenant image tags in kustomization.yaml via git write-back
+tenants/            One subdir per logical app. Each has app.yaml + manifests/ (kustomization.yaml)
+  rookia/           api Deployment (images on GHCR). External Supabase Postgres; async jobs via QStash — no in-cluster worker.
+  tally/, tally-dev/, nestapp-dev/   api (+ worker) on the host Postgres
 host/               Host-level config NOT managed by ArgoCD — symlinked into the box's filesystem and reloaded manually. See host/README.md.
   k3s/config.yaml   → /etc/rancher/k3s/config.yaml on the homelab box
-  postgres/         → host Postgres (serves the tally tenant) + pgBackRest backups
+  postgres/         → host Postgres 17 (serves tally + nestapp tenants) + pgBackRest backups to R2
   hermes/           → "Adolf" agent: systemd unit, CLI wrapper, sudoers (see Hermes section)
 ```
 
@@ -48,13 +51,13 @@ Each platform component is **self-managing** via Helm: the `app.yaml` points at 
 ## Tenancy rules (enforced, not suggestions)
 
 - One namespace per tenant. Every workload must set `namespace: <tenant>`. Never deploy to `default`.
-- Every tenant has a `ResourceQuota` in `platform/namespaces/<tenant>.yaml`. Every Pod spec must declare both `resources.requests` and `resources.limits`, or the quota will reject it.
+- Every tenant has a `ResourceQuota` in `platform/namespaces/manifests/<tenant>.yaml`. Every Pod spec must declare both `resources.requests` and `resources.limits`, or the quota will reject it.
 - Secrets are committed only as `SealedSecret` (generated with `kubeseal --cert pub-cert.pem`). Plain `Secret` / `.env` / `*.env.*` are gitignored — do not commit them even temporarily.
-- Public ingress is exclusively via the shared Cloudflare Tunnel in `platform/cloudflared/`. No new tunnels, no NodePorts for public traffic, no Traefik (disabled at install). LAN-only services skip the public hostname; reach them via Tailscale (Phase 14) or `kubectl port-forward`.
+- Public ingress is exclusively via the shared Cloudflare Tunnel in `platform/cloudflared/`. No new tunnels, no NodePorts for public traffic, no Traefik (disabled at install). LAN-only services skip the public hostname; reach them via Tailscale (host-level, SETUP.md Phase 8) or `kubectl port-forward`.
 
 ## Images
 
-`tenants/rookia` pulls `ghcr.io/<user>/rookia-api:...` built by the Rookia monorepo's GitHub Actions (Phase 8). Only `linux/amd64` — the homelab is x86_64, no multi-arch needed. There is no separate worker — async work arrives as signed QStash (Upstash) HTTP webhooks to the api. The `rookia-api-migrate` Job runs the same image with `bun run db:migrate` ahead of rollout via Argo sync waves.
+Tenant images are built by each app repo's GitHub Actions and pushed to GHCR (`ghcr.io/everspader/<image>:X.Y.Z`); ArgoCD Image Updater bumps the tag in the tenant's `kustomization.yaml` (SETUP.md Phases 10 and 13). `tenants/rookia` pulls `ghcr.io/everspader/rookia-api`. Only `linux/amd64` — the homelab is x86_64, no multi-arch needed. There is no separate worker — async work arrives as signed QStash (Upstash) HTTP webhooks to the api. The `rookia-api-migrate` Job runs the same image with `bun run db:migrate` ahead of rollout via Argo sync waves.
 
 ## Hermes (Adolf) — host-level agent
 
@@ -75,7 +78,7 @@ The bypass module (`patches/anthropic_billing_bypass.py` + venv `sitecustomize.p
 
 ## Common commands
 
-`kubectl` targets the cluster via `~/.kube/homelab.yaml` (set `KUBECONFIG` or merge into `~/.kube/config`). From the Mac:
+`kubectl` targets the cluster via `~/.kube/homelab.yaml` (set `KUBECONFIG` or merge into `~/.kube/config`). It points at the Tailscale IP, so Tailscale must be running on the Mac; on the LAN, `ssh homelab-lan kubectl ...` is a fallback. From the Mac:
 
 ```bash
 # Cluster / ArgoCD status
@@ -108,9 +111,9 @@ Standard flow to add or update a tenant's env:
    kubectl create secret generic <tenant>-env -n <tenant> \
      --from-env-file=tenants/<tenant>/.env --dry-run=client -o yaml \
      | kubeseal --cert pub-cert.pem -o yaml \
-     > tenants/<tenant>/<scope>/manifests/sealed-env.yaml
+     > tenants/<tenant>/manifests/sealed-env.yaml
    ```
-   `<scope>` is `manifests/` — e.g. `tenants/rookia/manifests/sealed-env.yaml`, the `rookia-env` Secret consumed by both the api Deployment and the migrate Job.
+   E.g. `tenants/rookia/manifests/sealed-env.yaml`, the `rookia-env` Secret consumed by both the api Deployment and the migrate Job.
 3. `git add && git commit && git push`. ArgoCD picks up the change on the next sync (near-instant via the GitHub webhook).
 4. Sealed Secrets controller decrypts the new manifest and overwrites the underlying `Secret`.
 5. **Pods do not auto-restart on Secret change.** Bounce the consumers: `kubectl rollout restart deploy/<name> -n <tenant>` (one per Deployment that uses the Secret).
