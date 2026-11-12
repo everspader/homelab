@@ -4,6 +4,11 @@ Documentation=https://pgbackrest.org/
 # Don't run unless Postgres is up.
 After=postgresql@17-main.service
 Requires=postgresql@17-main.service
+# Telegram alert through Hermes when a backup run fails (non-zero exit,
+# signal, timeout). Not fired when the run never starts because
+# postgresql@17-main failed (systemd reports that as a dependency failure).
+# %n is this unit, e.g. pgbackrest@full.service.
+OnFailure=pgbackrest-notify-failure@%n.service
 
 [Service]
 Type=oneshot

@@ -23,6 +23,10 @@ Not tracked here: Tailscale (installed from its apt repo, state in `/var/lib/tai
 | `host/postgres/systemd/pgbackrest@.service` | `/etc/systemd/system/pgbackrest@.service` | `sudo systemctl daemon-reload` |
 | `host/postgres/systemd/pgbackrest@full.timer` | `/etc/systemd/system/pgbackrest@full.timer` | `sudo systemctl daemon-reload && sudo systemctl restart pgbackrest@full.timer` |
 | `host/postgres/systemd/pgbackrest@diff.timer` | `/etc/systemd/system/pgbackrest@diff.timer` | `sudo systemctl daemon-reload && sudo systemctl restart pgbackrest@diff.timer` |
+| `host/postgres/systemd/pgbackrest-notify-failure@.service` | `/etc/systemd/system/pgbackrest-notify-failure@.service` | `sudo systemctl daemon-reload` |
+| `host/postgres/bin/pgbackrest-notify-failure` | (not linked; the unit above runs it from `/opt/homelab`) | (none — edits live after `git pull`) |
+
+`pgbackrest@.service` has `OnFailure=pgbackrest-notify-failure@%n.service`. When a full or diff backup fails, the notify unit runs as the `hermes` user (with `systemd-journal` added for that unit only) and sends the failed run's last log lines to Telegram with `hermes send`. It runs as `hermes`, not root, because `hermes` can write the script in `/opt/homelab`. Test it with `sudo systemctl start pgbackrest-notify-failure@pgbackrest@diff.service.service`.
 | `host/hermes/systemd/hermes.service` | `/etc/systemd/system/hermes.service` | `sudo systemctl daemon-reload && sudo systemctl restart hermes` |
 | `host/hermes/bin/hermes-cli` | `/usr/local/bin/hermes` | (none — wrapper script; edits live as soon as they land in the repo) |
 

@@ -1,0 +1,20 @@
+[Unit]
+Description=Telegram alert (via Hermes) for failed %i
+# Started by OnFailure= in pgbackrest@.service. %i is the failed unit name,
+# e.g. pgbackrest@full.service.
+
+[Service]
+Type=oneshot
+# Runs as hermes, not root: the script lives in /opt/homelab, which hermes
+# can write, so running it as root would hand the agent root. The
+# systemd-journal group (this unit only) lets it read the failed unit's logs.
+User=hermes
+Group=hermes
+SupplementaryGroups=systemd-journal
+Environment=HOME=/var/lib/hermes
+Environment=HERMES_HOME=/var/lib/hermes/.hermes
+# hermes walks up from its CWD looking for .git, so the CWD must be readable.
+WorkingDirectory=/var/lib/hermes
+ExecStart=/opt/homelab/host/postgres/bin/pgbackrest-notify-failure %i
+PrivateTmp=true
+NoNewPrivileges=true

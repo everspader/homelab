@@ -35,7 +35,7 @@ Deferred work. Not blocking, but written down so it is not forgotten.
 
 - [ ] **etcd offsite snapshots (Phase 12.2).** Local snapshots run on the k3s default schedule. Nothing leaves the box yet.
 - [ ] **pgBackRest restore test routine.** Monthly automated restore of the latest backup into a side cluster on a different port. Assert that key tables exist, then tear it down. A `pgbackrest@verify.timer` would do it.
-- [ ] **Failure alerting on `pgbackrest@.service`.** A systemd `OnFailure=` hook that pushes a notification (ntfy, Telegram via Hermes, email), so a backup that fails silently is caught early.
+- [ ] **Alert when a backup never starts.** The Telegram alert (Phase 11.4) fires only when a backup run fails. If `postgresql@17-main` is down, systemd skips the run as a dependency failure and sends nothing. A check on the age of the latest backup would cover this.
 - [ ] **R2 bucket versioning + delete protection** on the pgBackRest bucket. Protects against deletion of all backups through a compromised API key.
 - [ ] **Reflector for a cluster-wide imagePullSecret.** Each tenant has its own `ghcr-pull` SealedSecret (4 copies today). Reflector mirrors one source Secret into N namespaces by annotation.
 - [ ] **PVC backups.** Restic or kopia for `/var/lib/rancher/k3s/storage/` (VMSingle, VictoriaLogs, Grafana). etcd snapshots cover cluster state only, not volume data.
@@ -1044,6 +1044,16 @@ sudo systemctl start pgbackrest@full.service             # first full backup now
 ```
 
 A diff needs an existing full backup. If none exists, pgBackRest takes a full instead.
+
+5. Failure alerts (needs Hermes from Phase 14 with Telegram configured). `pgbackrest@.service` has `OnFailure=pgbackrest-notify-failure@%n.service`. When a backup run fails, that unit runs [`host/postgres/bin/pgbackrest-notify-failure`](host/postgres/bin/pgbackrest-notify-failure) as the `hermes` user, which sends the unit name, exit status and last log lines to Telegram with `hermes send`. Link the unit and send a test alert:
+
+```bash
+sudo ln -s /opt/homelab/host/postgres/systemd/pgbackrest-notify-failure@.service /etc/systemd/system/pgbackrest-notify-failure@.service
+sudo systemctl daemon-reload
+sudo systemctl start pgbackrest-notify-failure@pgbackrest@diff.service.service   # test: Telegram message arrives
+```
+
+The notify unit runs as `hermes`, not root, because `hermes` can write to `/opt/homelab` and could otherwise change the script to run code as root.
 
 Restore (into a stopped, empty or stale data directory):
 

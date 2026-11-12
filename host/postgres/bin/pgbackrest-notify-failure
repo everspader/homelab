@@ -1,0 +1,36 @@
+#!/bin/bash
+# Send a Telegram alert through Hermes when a pgBackRest backup unit fails.
+#
+# Started by pgbackrest-notify-failure@.service (as the hermes user), which
+# pgbackrest@.service names in OnFailure=. `hermes send` reuses the gateway's
+# Telegram bot token from /var/lib/hermes/.hermes/.env. No LLM, no agent loop,
+# and the gateway does not need to be running.
+#
+# $1 is the failed unit (e.g. pgbackrest@full.service). systemd sets the
+# MONITOR_* variables for units started through OnFailure=.
+set -u
+
+unit="${1:?usage: pgbackrest-notify-failure <failed unit>}"
+hermes=/var/lib/hermes/.hermes/hermes-agent/venv/bin/hermes
+
+# Log lines from the failed run only, when systemd says which run it was.
+if [ -n "${MONITOR_INVOCATION_ID:-}" ]; then
+  logs=$(journalctl --no-pager -o cat "_SYSTEMD_INVOCATION_ID=${MONITOR_INVOCATION_ID}" | tail -n 15)
+else
+  logs=$(journalctl --no-pager -o cat -u "$unit" -n 15)
+fi
+
+body=$(cat <<EOF
+Unit: ${unit}
+Result: ${MONITOR_SERVICE_RESULT:-unknown} (${MONITOR_EXIT_CODE:-?} ${MONITOR_EXIT_STATUS:-?})
+Time: $(date -u '+%Y-%m-%d %H:%M UTC')
+
+Last log lines:
+${logs:-<no journal lines found>}
+
+Check: sudo -u postgres pgbackrest --stanza=main info
+EOF
+)
+
+printf '%s\n' "$body" \
+  | "$hermes" send --to telegram --subject "⚠️ $(hostname): pgBackRest backup failed" --quiet
