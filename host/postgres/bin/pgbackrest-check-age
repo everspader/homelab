@@ -1,0 +1,57 @@
+#!/usr/bin/python3
+"""Fail when the newest pgBackRest backup is too old.
+
+Run daily by pgbackrest-check-age.timer as the postgres user. A non-zero exit
+fails pgbackrest-check-age.service, whose OnFailure= sends the log lines below
+to Telegram through Hermes (pgbackrest-notify-failure@.service).
+
+Catches what OnFailure= on pgbackrest@.service cannot: backups that never ran
+(Postgres down, timers disabled, box off) and an unreachable or broken repo.
+`pgbackrest info` reads the repo only, so it works while Postgres is down.
+
+Threshold: PGBR_MAX_AGE_HOURS (default 48). Exit codes: 0 fresh, 1 stale or
+no backups, 2 could not read the repo.
+
+Installed as a root-owned copy at /usr/local/libexec/pgbackrest-check-age, not
+run from /opt/homelab: the hermes user can write the repo, and this runs as
+postgres.
+"""
+import json
+import os
+import subprocess
+import sys
+import time
+
+STANZA = "main"
+max_age_h = float(os.environ.get("PGBR_MAX_AGE_HOURS", "48"))
+
+try:
+    out = subprocess.run(
+        ["pgbackrest", f"--stanza={STANZA}", "info", "--output=json"],
+        check=True, capture_output=True, text=True, timeout=300,
+    ).stdout
+    stanza = json.loads(out)[0]
+except Exception as exc:  # repo unreachable, bad config, bad JSON, timeout
+    print(f"could not read pgBackRest repo for stanza {STANZA}: {exc}", file=sys.stderr)
+    sys.exit(2)
+
+status = stanza.get("status", {})
+if status.get("code") != 0:
+    print(f"stanza {STANZA} status: {status.get('message')} (code {status.get('code')})", file=sys.stderr)
+
+backups = stanza.get("backup", [])
+if not backups:
+    print(f"no backups found for stanza {STANZA}", file=sys.stderr)
+    sys.exit(1)
+
+latest = max(backups, key=lambda b: b["timestamp"]["stop"])
+stop = latest["timestamp"]["stop"]
+age_h = (time.time() - stop) / 3600
+when = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(stop))
+
+msg = f"latest backup {latest['label']} ({latest['type']}) finished {when}, {age_h:.1f}h ago"
+if age_h > max_age_h:
+    print(f"STALE: {msg}; limit is {max_age_h:g}h", file=sys.stderr)
+    sys.exit(1)
+
+print(f"ok: {msg}")

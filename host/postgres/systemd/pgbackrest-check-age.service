@@ -1,0 +1,18 @@
+[Unit]
+Description=Check that the latest pgBackRest backup is less than 2 days old
+Documentation=https://pgbackrest.org/
+# No dependency on postgresql@17-main: `pgbackrest info` reads only the R2 repo,
+# so this check still runs (and alerts) while Postgres is down.
+After=network-online.target
+Wants=network-online.target
+# Stale backup, empty repo, or unreadable repo → Telegram alert through Hermes.
+OnFailure=pgbackrest-notify-failure@%n.service
+
+[Service]
+Type=oneshot
+User=postgres
+Group=postgres
+Environment=PGBR_MAX_AGE_HOURS=48
+# Root-owned copy, installed (not symlinked) from host/postgres/bin/ — see host/README.md.
+ExecStart=/usr/local/libexec/pgbackrest-check-age
+SyslogIdentifier=pgbackrest-check-age

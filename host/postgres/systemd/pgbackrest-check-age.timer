@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily check of pgBackRest backup age
+
+[Timer]
+# 09:00 UTC, well after the 03:30 daily diff (and Sunday's 02:00 full).
+OnCalendar=*-*-* 09:00:00
+Persistent=true
+RandomizedDelaySec=600
+
+[Install]
+WantedBy=timers.target

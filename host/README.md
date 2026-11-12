@@ -25,8 +25,12 @@ Not tracked here: Tailscale (installed from its apt repo, state in `/var/lib/tai
 | `host/postgres/systemd/pgbackrest@diff.timer` | `/etc/systemd/system/pgbackrest@diff.timer` | `sudo systemctl daemon-reload && sudo systemctl restart pgbackrest@diff.timer` |
 | `host/postgres/systemd/pgbackrest-notify-failure@.service` | `/etc/systemd/system/pgbackrest-notify-failure@.service` | `sudo systemctl daemon-reload` |
 | `host/postgres/bin/pgbackrest-notify-failure` | (not linked; the unit above runs it from `/opt/homelab`) | (none — edits live after `git pull`) |
+| `host/postgres/systemd/pgbackrest-check-age.service` | `/etc/systemd/system/pgbackrest-check-age.service` | `sudo systemctl daemon-reload` |
+| `host/postgres/systemd/pgbackrest-check-age.timer` | `/etc/systemd/system/pgbackrest-check-age.timer` | `sudo systemctl daemon-reload && sudo systemctl restart pgbackrest-check-age.timer` |
 
 `pgbackrest@.service` has `OnFailure=pgbackrest-notify-failure@%n.service`. When a full or diff backup fails, the notify unit runs as the `hermes` user (with `systemd-journal` added for that unit only) and sends the failed run's last log lines to Telegram with `hermes send`. It runs as `hermes`, not root, because `hermes` can write the script in `/opt/homelab`. Test it with `sudo systemctl start pgbackrest-notify-failure@pgbackrest@diff.service.service`.
+
+`pgbackrest-check-age.timer` runs daily at 09:00 UTC. The service runs `pgbackrest info` as `postgres` and fails when the newest backup is older than 48 hours (`PGBR_MAX_AGE_HOURS`), the repo has no backups, or the repo cannot be read. Its `OnFailure=` uses the same Telegram notifier. It has no dependency on Postgres, so it still alerts when Postgres is down and the backup units never start.
 | `host/hermes/systemd/hermes.service` | `/etc/systemd/system/hermes.service` | `sudo systemctl daemon-reload && sudo systemctl restart hermes` |
 | `host/hermes/bin/hermes-cli` | `/usr/local/bin/hermes` | (none — wrapper script; edits live as soon as they land in the repo) |
 
@@ -37,6 +41,9 @@ Not tracked here: Tailscale (installed from its apt repo, state in `/var/lib/tai
 | Repo path | Real path on box | Apply command (re-run after each edit) |
 | --- | --- | --- |
 | `host/hermes/sudoers.d/50-hermes-cli` | `/etc/sudoers.d/50-hermes-cli` | `sudo install -m 0440 -o root -g root /opt/homelab/host/hermes/sudoers.d/50-hermes-cli /etc/sudoers.d/50-hermes-cli && sudo visudo -cf /etc/sudoers.d/50-hermes-cli` |
+| `host/postgres/bin/pgbackrest-check-age` | `/usr/local/libexec/pgbackrest-check-age` | `sudo install -m 0755 -o root -g root /opt/homelab/host/postgres/bin/pgbackrest-check-age /usr/local/libexec/pgbackrest-check-age` |
+
+The age check runs as `postgres`, and `hermes` can write `/opt/homelab`, so it runs from a root-owned copy. Otherwise Adolf could edit the script and run code as the Postgres superuser.
 
 The `90-home-nopasswd` fragment for the `home` user is not tracked; SETUP.md Phase 2.1 creates it.
 

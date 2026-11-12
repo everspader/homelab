@@ -1,8 +1,8 @@
 #!/bin/bash
-# Send a Telegram alert through Hermes when a pgBackRest backup unit fails.
+# Send a Telegram alert through Hermes when a pgBackRest unit fails.
 #
 # Started by pgbackrest-notify-failure@.service (as the hermes user), which
-# pgbackrest@.service names in OnFailure=. `hermes send` reuses the gateway's
+# pgbackrest@.service and pgbackrest-check-age.service name in OnFailure=. `hermes send` reuses the gateway's
 # Telegram bot token from /var/lib/hermes/.hermes/.env. No LLM, no agent loop,
 # and the gateway does not need to be running.
 #
@@ -33,4 +33,4 @@ EOF
 )
 
 printf '%s\n' "$body" \
-  | "$hermes" send --to telegram --subject "⚠️ $(hostname): pgBackRest backup failed" --quiet
+  | "$hermes" send --to telegram --subject "⚠️ $(hostname): ${unit} failed" --quiet

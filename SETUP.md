@@ -35,7 +35,6 @@ Deferred work. Not blocking, but written down so it is not forgotten.
 
 - [ ] **etcd offsite snapshots (Phase 12.2).** Local snapshots run on the k3s default schedule. Nothing leaves the box yet.
 - [ ] **pgBackRest restore test routine.** Monthly automated restore of the latest backup into a side cluster on a different port. Assert that key tables exist, then tear it down. A `pgbackrest@verify.timer` would do it.
-- [ ] **Alert when a backup never starts.** The Telegram alert (Phase 11.4) fires only when a backup run fails. If `postgresql@17-main` is down, systemd skips the run as a dependency failure and sends nothing. A check on the age of the latest backup would cover this.
 - [ ] **R2 bucket versioning + delete protection** on the pgBackRest bucket. Protects against deletion of all backups through a compromised API key.
 - [ ] **Reflector for a cluster-wide imagePullSecret.** Each tenant has its own `ghcr-pull` SealedSecret (4 copies today). Reflector mirrors one source Secret into N namespaces by annotation.
 - [ ] **PVC backups.** Restic or kopia for `/var/lib/rancher/k3s/storage/` (VMSingle, VictoriaLogs, Grafana). etcd snapshots cover cluster state only, not volume data.
@@ -1054,6 +1053,21 @@ sudo systemctl start pgbackrest-notify-failure@pgbackrest@diff.service.service  
 ```
 
 The notify unit runs as `hermes`, not root, because `hermes` can write to `/opt/homelab` and could otherwise change the script to run code as root.
+
+6. Backup age check. A failed run alerts through step 5, but a run that never starts does not: if `postgresql@17-main` is down, systemd skips the backup as a dependency failure and `OnFailure=` never fires. `pgbackrest-check-age.timer` covers that. Every day at 09:00 UTC it runs [`host/postgres/bin/pgbackrest-check-age`](host/postgres/bin/pgbackrest-check-age) as `postgres`, which fails when the newest backup is older than 48 hours, the repo is empty, or the repo cannot be read. The failure goes to Telegram through the same notifier. `pgbackrest info` only reads R2, so the check works while Postgres is down.
+
+The script runs as `postgres`, so install a root-owned copy instead of running it from `/opt/homelab` (which `hermes` can write). Re-run the `install` line after every edit to the script.
+
+```bash
+sudo install -d -m 0755 /usr/local/libexec
+sudo install -m 0755 -o root -g root /opt/homelab/host/postgres/bin/pgbackrest-check-age /usr/local/libexec/pgbackrest-check-age
+sudo ln -s /opt/homelab/host/postgres/systemd/pgbackrest-check-age.service /etc/systemd/system/pgbackrest-check-age.service
+sudo ln -s /opt/homelab/host/postgres/systemd/pgbackrest-check-age.timer   /etc/systemd/system/pgbackrest-check-age.timer
+sudo systemctl daemon-reload
+sudo systemctl enable --now pgbackrest-check-age.timer
+sudo systemctl start pgbackrest-check-age.service       # should succeed: "ok: latest backup ..."
+journalctl -u pgbackrest-check-age.service -n 3 -o cat
+```
 
 Restore (into a stopped, empty or stale data directory):
 
