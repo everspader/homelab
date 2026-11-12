@@ -1227,7 +1227,14 @@ Tracked config is in [`host/hermes/`](host/hermes/): the systemd unit, the `herm
 Install outline:
 
 1. Create the `hermes` system user and `/var/lib/hermes` (owned `hermes:hermes`, 0750). Install Hermes into `/var/lib/hermes`.
-2. Give it repo write access: `sudo setfacl -R -m u:hermes:rwX /opt/homelab && sudo setfacl -R -d -m u:hermes:rwX /opt/homelab`, plus its own GitHub deploy key with write access. It commits as `Adolf <adolf@spaderlabs.com>`.
+2. Give it repo write access with an ACL, plus its own GitHub deploy key with write access. It commits as `Adolf <adolf@spaderlabs.com>`. Grant `home` the same ACL in the same step. Without it, the `.git/objects` subdirectories that Adolf creates are owned by `hermes` and not writable by `home`, and `git pull` as `home` fails with `insufficient permission for adding an object to repository database`.
+
+   ```bash
+   for u in hermes home; do
+     sudo setfacl -R -m u:$u:rwX /opt/homelab                              # existing files and dirs
+     sudo find /opt/homelab -type d -exec setfacl -m d:u:$u:rwX {} +       # default ACL for new ones (dirs only)
+   done
+   ```
 3. Link the unit and the wrapper, install the sudoers fragment (copied, not linked), then start it. Exact commands are in [`host/README.md`](host/README.md).
 
 ```bash
