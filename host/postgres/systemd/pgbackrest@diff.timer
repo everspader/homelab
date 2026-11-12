@@ -1,0 +1,15 @@
+[Unit]
+Description=Daily pgBackRest differential backup
+Documentation=https://pgbackrest.org/
+
+[Timer]
+# Daily 03:30 UTC. On Sundays this runs after the 02:00 full (plus its up to
+# 10 min random delay; a full takes ~5 min), so Sunday's diff is against the
+# fresh full. A diff holds only the changes since the last full; with
+# repo1-retention-diff=8 that's 8 daily restore points on top of 4 fulls.
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

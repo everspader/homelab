@@ -34,9 +34,8 @@ _Last verified against the running box: 2026-11-12 (k3s v1.35.4+k3s1, Postgres 1
 Deferred work. Not blocking, but written down so it is not forgotten.
 
 - [ ] **etcd offsite snapshots (Phase 12.2).** Local snapshots run on the k3s default schedule. Nothing leaves the box yet.
-- [ ] **pgBackRest differential backups.** `pgbackrest@full.timer` (weekly full) is the only timer installed. Its comment and `repo1-retention-diff=8` assume a daily diff timer (`pgbackrest@diff.timer`) that does not exist yet. WAL archiving still gives point-in-time recovery between fulls.
 - [ ] **pgBackRest restore test routine.** Monthly automated restore of the latest backup into a side cluster on a different port. Assert that key tables exist, then tear it down. A `pgbackrest@verify.timer` would do it.
-- [ ] **Failure alerting on `pgbackrest@full.service`.** A systemd `OnFailure=` hook that pushes a notification (ntfy, Telegram via Hermes, email), so a weekly backup that fails silently is caught early.
+- [ ] **Failure alerting on `pgbackrest@.service`.** A systemd `OnFailure=` hook that pushes a notification (ntfy, Telegram via Hermes, email), so a backup that fails silently is caught early.
 - [ ] **R2 bucket versioning + delete protection** on the pgBackRest bucket. Protects against deletion of all backups through a compromised API key.
 - [ ] **Reflector for a cluster-wide imagePullSecret.** Each tenant has its own `ghcr-pull` SealedSecret (4 copies today). Reflector mirrors one source Secret into N namespaces by annotation.
 - [ ] **PVC backups.** Restic or kopia for `/var/lib/rancher/k3s/storage/` (VMSingle, VictoriaLogs, Grafana). etcd snapshots cover cluster state only, not volume data.
@@ -47,7 +46,7 @@ Deferred work. Not blocking, but written down so it is not forgotten.
 - GMKtec NucBox G11, 16GB / 512GB NVMe
 - Wired Ethernet from the G11 to the TP-Link Deco mesh router (LAN IP `192.168.68.106`); wifi (`192.168.68.109`) available as fallback
 - Mac with Homebrew, on the same LAN for the first phases (Tailscale for remote access later)
-- Cloudflare account with the `spaderlabs.com` zone (homelab infra hostnames, e.g. `argo.spaderlabs.com`) plus any tenant zones (e.g. `rookia.com`)
+- Cloudflare account with the `spaderlabs.com` zone (homelab infra hostnames, e.g. `argo.spaderlabs.com`) plus a zone for each tenant that has its own domain
 - GitHub account `everspader` (SSH public keys imported into the host installer; owns the `homelab` repo and the tenant images on GHCR)
 - 1Password for every plaintext secret (Sealed Secrets backup key, ArgoCD admin password, R2 keys, Postgres role passwords)
 - USB stick (≥4GB) for the Ubuntu Server installer
@@ -962,7 +961,7 @@ Because the updater pushes to `main`, always `git pull --rebase` before you push
 
 ## Phase 11 — Host Postgres 17 + pgBackRest (~1.5 hr)
 
-**Goal:** one Postgres cluster on the host for tenants that want a local database, with continuous WAL archiving and weekly full backups to Cloudflare R2. It runs outside k3s on purpose: simpler upgrades and backups, and no database data on a node-local PVC.
+**Goal:** one Postgres cluster on the host for tenants that want a local database, with continuous WAL archiving, weekly full and daily differential backups to Cloudflare R2. It runs outside k3s on purpose: simpler upgrades and backups, and no database data on a node-local PVC.
 
 Config files are in [`host/postgres/`](host/postgres/) and are symlinked into place. See [`host/README.md`](host/README.md) for the full file map.
 
@@ -1026,15 +1025,25 @@ sudo -u postgres pgbackrest --stanza=main stanza-create
 sudo -u postgres pgbackrest --stanza=main check        # forces a WAL switch and confirms it reached R2
 ```
 
-4. Link the systemd units and enable the weekly full backup (Sundays 02:00 UTC):
+4. Link the systemd units and enable both timers. `pgbackrest@.service` is a template: the instance name is the backup type (`full` or `diff`).
+
+| Timer | Schedule (UTC) | What it stores |
+| --- | --- | --- |
+| `pgbackrest@full.timer` | Sundays 02:00 | Complete copy of the cluster. 4 kept (`repo1-retention-full=4`). |
+| `pgbackrest@diff.timer` | Daily 03:30 | Changes since the last full. 8 kept (`repo1-retention-diff=8`). |
+
+WAL archiving covers the time between backups. The daily diff shortens a restore: pgBackRest replays at most one day of WAL instead of up to a week.
 
 ```bash
 sudo ln -s /opt/homelab/host/postgres/systemd/pgbackrest@.service    /etc/systemd/system/pgbackrest@.service
 sudo ln -s /opt/homelab/host/postgres/systemd/pgbackrest@full.timer  /etc/systemd/system/pgbackrest@full.timer
+sudo ln -s /opt/homelab/host/postgres/systemd/pgbackrest@diff.timer  /etc/systemd/system/pgbackrest@diff.timer
 sudo systemctl daemon-reload
-sudo systemctl enable --now pgbackrest@full.timer
+sudo systemctl enable --now pgbackrest@full.timer pgbackrest@diff.timer
 sudo systemctl start pgbackrest@full.service             # first full backup now
 ```
+
+A diff needs an existing full backup. If none exists, pgBackRest takes a full instead.
 
 Restore (into a stopped, empty or stale data directory):
 
@@ -1054,8 +1063,8 @@ Pods connect to the **node LAN IP**: `postgres://<role>:<pw>@192.168.68.106:5432
 
 ```bash
 sudo -u postgres psql -Atc "select datname from pg_database where not datistemplate"
-sudo -u postgres pgbackrest --stanza=main info      # status: ok, at least one full backup
-systemctl list-timers pgbackrest@full.timer
+sudo -u postgres pgbackrest --stanza=main info      # status: ok, full + diff backups listed
+systemctl list-timers 'pgbackrest@*'
 ```
 
 ---
