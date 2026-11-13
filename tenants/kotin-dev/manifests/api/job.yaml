@@ -1,0 +1,54 @@
+# Drizzle migrations for the kotin-dev API.
+# ArgoCD Sync hook at wave 5: runs after the SealedSecrets (wave 0) and before the
+# Deployment (wave 10) on every sync. Not PreSync: on a brand-new tenant PreSync runs
+# before the secrets exist (SETUP.md Key traps). If the migration fails, the rest of
+# the sync aborts and the old pods keep running.
+# The image's CMD is the server; migrations are the second entrypoint
+# (`node dist/migrate.js`, MIGRATIONS_DIR=/app/drizzle set in the image).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kotin-api-migrate
+  namespace: kotin-dev
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/sync-wave: "5"
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 0 # don't retry — fail loud
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: Never
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: migrate
+          image: ghcr.io/everspader/kotin-api:0.5.0 # tag overridden by ../kustomization.yaml `images:` (kept in lockstep with Deployment)
+          imagePullPolicy: IfNotPresent
+          command: ["node", "dist/migrate.js"]
+          envFrom:
+            - secretRef:
+                name: kotin-env
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

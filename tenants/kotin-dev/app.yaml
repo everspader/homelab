@@ -1,0 +1,36 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kotin-dev
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  # argocd-image-updater: same setup as tenants/tally-dev/app.yaml (semver
+  # strategy, strict X.Y.Z allow-tags, cross-namespace pull secret, GitHub App
+  # write-back into this tenant's kustomization.yaml). The image is built by the
+  # Kotin app repo's CI (formerly nestapp) on `api@X.Y.Z` release tags and pushed as kotin-api:X.Y.Z.
+  annotations:
+    argocd-image-updater.argoproj.io/image-list: kotin=ghcr.io/everspader/kotin-api
+    argocd-image-updater.argoproj.io/kotin.update-strategy: semver
+    argocd-image-updater.argoproj.io/kotin.allow-tags: 'regexp:^\d+\.\d+\.\d+$'
+    argocd-image-updater.argoproj.io/kotin.pull-secret: pullsecret:kotin-dev/ghcr-pull
+    argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/github-app-homelab
+    argocd-image-updater.argoproj.io/git-branch: main
+    argocd-image-updater.argoproj.io/write-back-target: kustomization
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/everspader/homelab.git
+    targetRevision: HEAD
+    path: tenants/kotin-dev/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kotin-dev
+  syncPolicy:
+    automated:
+      selfHeal: true
+      # prune disabled: this tenant carries SealedSecrets; a renamed sealed
+      # file with prune on could delete the live Secret. Same caution as rookia.
+      prune: false
+    syncOptions:
+      - ServerSideApply=true
