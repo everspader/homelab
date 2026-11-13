@@ -36,7 +36,7 @@ Deferred work. Not blocking, but written down so it is not forgotten.
 - [ ] **etcd restore test (Phase 12.4).** Restore an R2 snapshot on a spare VM once to prove it works.
 - [ ] **pgBackRest restore test routine.** Monthly automated restore of the latest backup into a side cluster on a different port. Assert that key tables exist, then tear it down. A `pgbackrest@verify.timer` would do it.
 - [ ] **R2 bucket versioning + delete protection** on the pgBackRest bucket. Protects against deletion of all backups through a compromised API key.
-- [ ] **Reflector for a cluster-wide imagePullSecret.** Each tenant has its own `ghcr-pull` SealedSecret (4 copies today). Reflector mirrors one source Secret into N namespaces by annotation.
+- [ ] **Reflector for a cluster-wide imagePullSecret.** Each tenant has its own `ghcr-pull` SealedSecret (5 copies today). Reflector mirrors one source Secret into N namespaces by annotation.
 - [ ] **PVC backups.** Restic or kopia for `/var/lib/rancher/k3s/storage/` (VMSingle, VictoriaLogs, Grafana). etcd snapshots cover cluster state only, not volume data.
 - [ ] **Tailscale Kubernetes operator** (optional). Only needed to expose individual Services on the tailnet. The host-level install already covers `ssh`, `kubectl` and Postgres.
 
