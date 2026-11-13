@@ -51,7 +51,7 @@ The `90-home-nopasswd` fragment for the `home` user is not tracked; SETUP.md Pha
 
 | Repo path | Purpose |
 | --- | --- |
-| `host/postgres/provision-<tenant>.sql` | Creates a tenant's databases and dedicated roles on the host Postgres. Passwords passed as psql variables; usage in each file's header. `provision-nestapp.sql` is the template; `provision-kotin.sql` (kotin, kotin_dev) follows it. |
+| `host/postgres/provision-<tenant>.sql` | Creates a tenant's databases and dedicated roles on the host Postgres. Passwords passed as psql variables; usage in each file's header. `provision-kotin.sql` (kotin, kotin_dev) is the template. |
 
 ### Reference-only (template, not symlinked)
 

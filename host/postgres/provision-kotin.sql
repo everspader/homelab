@@ -1,7 +1,6 @@
--- Provision databases + roles for the kotin tenant (Nest renamed to Kotin) on the
--- host Postgres 17. Same isolation pattern as provision-nestapp.sql: one login role
--- per database, owner of its DB, CONNECT revoked from PUBLIC so roles can't peek at
--- each other. The nestapp / nestapp_dev databases stay until the move is verified.
+-- Provision databases + roles for the kotin tenant on the host Postgres 17. One
+-- login role per database, owner of its DB, CONNECT revoked from PUBLIC so roles
+-- can't peek at each other. Template for new host-Postgres tenants.
 --
 -- NOT applied by ArgoCD (host-level). Run once on the box as the postgres OS user,
 -- passing passwords from 1Password as psql variables (never commit them):

@@ -36,7 +36,7 @@ Deferred work. Not blocking, but written down so it is not forgotten.
 - [ ] **etcd restore test (Phase 12.4).** Restore an R2 snapshot on a spare VM once to prove it works.
 - [ ] **pgBackRest restore test routine.** Monthly automated restore of the latest backup into a side cluster on a different port. Assert that key tables exist, then tear it down. A `pgbackrest@verify.timer` would do it.
 - [ ] **R2 bucket versioning + delete protection** on the pgBackRest bucket. Protects against deletion of all backups through a compromised API key.
-- [ ] **Reflector for a cluster-wide imagePullSecret.** Each tenant has its own `ghcr-pull` SealedSecret (5 copies today). Reflector mirrors one source Secret into N namespaces by annotation.
+- [ ] **Reflector for a cluster-wide imagePullSecret.** Each tenant has its own `ghcr-pull` SealedSecret (4 copies today). Reflector mirrors one source Secret into N namespaces by annotation.
 - [ ] **PVC backups.** Restic or kopia for `/var/lib/rancher/k3s/storage/` (VMSingle, VictoriaLogs, Grafana). etcd snapshots cover cluster state only, not volume data.
 - [ ] **Tailscale Kubernetes operator** (optional). Only needed to expose individual Services on the tailnet. The host-level install already covers `ssh`, `kubectl` and Postgres.
 
@@ -1079,7 +1079,7 @@ sudo systemctl start postgresql@17-main
 
 ### 11.5 Per-tenant databases
 
-One login role per database, owner of that database, with `CONNECT` revoked from `PUBLIC` so tenants cannot see each other. Keep the provisioning SQL in `host/postgres/provision-<tenant>.sql` and run it once with passwords passed as psql variables from 1Password. See [`host/postgres/provision-nestapp.sql`](host/postgres/provision-nestapp.sql) for the template.
+One login role per database, owner of that database, with `CONNECT` revoked from `PUBLIC` so tenants cannot see each other. Keep the provisioning SQL in `host/postgres/provision-<tenant>.sql` and run it once with passwords passed as psql variables from 1Password. See [`host/postgres/provision-kotin.sql`](host/postgres/provision-kotin.sql) for the template.
 
 Pods connect to the **node LAN IP**: `postgres://<role>:<pw>@192.168.68.106:5432/<db>`. Pod traffic to the node IP is allowed by the `10.42.0.0/16` ufw and `pg_hba.conf` rules. Do not use the Tailscale IP from pods: the pod network does not route to it.
 
