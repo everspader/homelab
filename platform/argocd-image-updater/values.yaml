@@ -27,6 +27,16 @@ config:
 
   log.level: info
 
+  # GHCR push webhook: GitHub `package` events (action `published`) POST to
+  # https://image-updater.spaderlabs.com/webhook?type=ghcr.io through the shared
+  # Cloudflare Tunnel. The controller re-checks the matching CR right away
+  # instead of waiting for the next poll; polling stays on as the fallback.
+  # HMAC secret: manifests/sealed-webhook-secret.yaml.
+  webhook.enable: "true"
+  webhook.port: "8082"
+  # Cloudflare terminates TLS; cloudflared talks plain HTTP to the Service.
+  disable-tls: "true"
+
   # Commit author baked into every bump commit. Bot identity, no PII.
   git.user: argocd-image-updater
   git.email: argocd-image-updater@spaderlabs.com
@@ -58,3 +68,9 @@ resources:
 
 metrics:
   enabled: false   # flip on once observability stack is wired to scrape
+
+# ClusterIP Service for the webhook (port 8080 -> container port 8082). The
+# tunnel's public hostname points at
+# http://argocd-image-updater.argocd-image-updater.svc.cluster.local:8080
+service:
+  enabled: true
