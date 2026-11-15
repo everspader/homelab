@@ -949,12 +949,23 @@ Adding a tenant's CR is in Phase 13.5. Check them with `kubectl -n argocd get im
 **Verify:**
 
 ```bash
-kubectl -n argocd-image-updater logs deploy/argocd-image-updater | tail -20
+kubectl -n argocd-image-updater logs deploy/argocd-image-updater-controller | tail -20
 # → "Processing results: applications=N images_considered=M ... errors=0"
 git log --author=argocd-image-updater --oneline | head
 ```
 
 Because the updater pushes to `main`, always `git pull --rebase` before you push changes to this repo.
+
+### 10.1 GHCR push webhook
+
+Polling every 5 minutes is the fallback. A GitHub `package` webhook makes a new image bump within seconds:
+
+- **Controller:** `webhook.enable`, `webhook.port: 8082` and `disable-tls` in `values.yaml`, plus `service.enabled: true` (ClusterIP `argocd-image-updater:8080`). The HMAC secret is [`manifests/sealed-webhook-secret.yaml`](platform/argocd-image-updater/manifests/sealed-webhook-secret.yaml) (`argocd-image-updater-secret`, key `webhook.ghcr-secret`). Its plaintext lives in `platform/argocd-image-updater/webhook.env` on the Mac (gitignored).
+- **Tunnel public hostname** (dashboard-managed, Phase 7.4): `image-updater.spaderlabs.com`, path `^/webhook$` → `HTTP` `argocd-image-updater.argocd-image-updater.svc.cluster.local:8080`. No Cloudflare Access on it: GitHub cannot log in, and the HMAC signature authenticates requests.
+- **GitHub, per app repo** (`everspader/rookia`, `everspader/tally`, `everspader/kotin`): Settings → Webhooks → payload URL `https://image-updater.spaderlabs.com/webhook?type=ghcr.io`, content type `application/json`, the secret above, events: **Packages** only. The package must be linked to that repo to emit events.
+- The creation `ping` delivery fails with `400 unsupported event type: ping`. That is expected: only `package` / `published` events are handled.
+
+**Verify:** a release shows `200 Webhook received and processing` under Recent Deliveries, and the logs show `Received valid webhook event` followed by the bump commit.
 
 ---
 
