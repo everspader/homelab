@@ -5,29 +5,9 @@ metadata:
   namespace: argocd
   finalizers:
     - resources-finalizer.argocd.argoproj.io
-  # argocd-image-updater config. The updater watches GHCR for new tags
-  # matching the regex below, then commits the bumped tag into
-  # tenants/rookia/manifests/kustomization.yaml's `images:` block. ArgoCD
-  # then syncs the new tag into all three references (api, migrate).
-  #
-  #   image-list                : alias=image — `rookia` is the alias used in
-  #                               every other annotation key below.
-  #   update-strategy: semver   : pick highest semver tag matching allow-tags.
-  #   allow-tags                : strict X.Y.Z (no -rc / -beta / -dev).
-  #   (no pull-secret)          : GHCR auth is registry-wide, set in
-  #                               platform/argocd-image-updater/values.yaml.
-  #   write-back-method: git    : commit to git (not just patch in-cluster).
-  #   git:secret:argocd/...     : GitHub App creds reused from ArgoCD's repo
-  #                               creds; the App needs `Contents: write`.
-  #   write-back-target:        : kustomization → modify `images:` newTag in
-  #                               tenants/rookia/manifests/kustomization.yaml.
-  annotations:
-    argocd-image-updater.argoproj.io/image-list: rookia=ghcr.io/everspader/rookia-api
-    argocd-image-updater.argoproj.io/rookia.update-strategy: semver
-    argocd-image-updater.argoproj.io/rookia.allow-tags: 'regexp:^\d+\.\d+\.\d+$'
-    argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/github-app-homelab
-    argocd-image-updater.argoproj.io/git-branch: main
-    argocd-image-updater.argoproj.io/write-back-target: kustomization
+  # Image tag bumps come from the ImageUpdater CR in
+  # platform/argocd-image-updater/manifests/rookia.yaml (semver X.Y.Z,
+  # git write-back into manifests/kustomization.yaml's `images:` block).
 spec:
   project: default
   source:

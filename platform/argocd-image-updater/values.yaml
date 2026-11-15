@@ -3,7 +3,7 @@
 # rollout.
 #
 # 1.x is a Kubebuilder operator: it only acts on Applications matched by an
-# `ImageUpdater` CR (manifests/imageupdater-*.yaml). Those CRs live in the
+# `ImageUpdater` CR (manifests/<tenant>.yaml). Those CRs live in the
 # `argocd` namespace next to the Applications they select.
 #
 # Auth model:

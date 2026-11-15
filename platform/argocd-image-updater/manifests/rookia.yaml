@@ -1,0 +1,29 @@
+# Image updater config for the rookia Application.
+#
+# Watches GHCR for new rookia-api tags matching strict X.Y.Z (no -rc / -beta /
+# -dev), then commits the bumped tag into tenants/rookia/manifests/
+# kustomization.yaml's `images:` block. ArgoCD syncs the new tag into every
+# reference (api Deployment and the rookia-api-migrate Job).
+#
+# GHCR auth is registry-wide (values.yaml `config.registries`), so no pullSecret.
+# Must live in `argocd`: 1.x only selects Applications in the CR's namespace.
+apiVersion: argocd-image-updater.argoproj.io/v1alpha1
+kind: ImageUpdater
+metadata:
+  name: rookia
+  namespace: argocd
+spec:
+  commonUpdateSettings:
+    updateStrategy: semver
+    allowTags: 'regexp:^\d+\.\d+\.\d+$'
+  writeBackConfig:
+    # ArgoCD's GitHub App; must be in the CR's namespace. Needs Contents: write.
+    method: git:secret:github-app-homelab
+    gitConfig:
+      branch: main
+      writeBackTarget: kustomization
+  applicationRefs:
+    - namePattern: rookia
+      images:
+        - alias: rookia
+          imageName: ghcr.io/everspader/rookia-api

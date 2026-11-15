@@ -12,10 +12,9 @@ spec:
     - chart: argocd-image-updater
       repoURL: https://argoproj.github.io/argo-helm
       # 1.x line — Kubebuilder operator driven by `ImageUpdater` CRs (the chart
-      # installs the CRD). Tenants are still on their Application annotations
-      # via the bridge CR in manifests/imageupdater-legacy.yaml; they move to
-      # native CRs one at a time. 1.4+ is required: earlier CRDs stored
-      # defaults that broke setting inheritance.
+      # installs the CRD). One CR per tenant in manifests/<tenant>.yaml.
+      # 1.4+ is required: earlier CRDs stored defaults that broke setting
+      # inheritance.
       targetRevision: 1.5.0
       helm:
         valueFiles:

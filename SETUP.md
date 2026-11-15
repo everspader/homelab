@@ -932,7 +932,7 @@ Push. ArgoCD syncs, Grafana redeploys, they sign in with GitHub and get read-onl
 How it works:
 
 1. [`platform/argocd-image-updater/`](platform/argocd-image-updater/) installs chart `argocd-image-updater` **1.5.0**. The 1.x controller only acts on Applications selected by an `ImageUpdater` CR in the `argocd` namespace (`watch.namespaces: argocd`).
-2. Tenants are mid-migration: the bridge CR [`manifests/imageupdater-legacy.yaml`](platform/argocd-image-updater/manifests/imageupdater-legacy.yaml) sets `useAnnotations: true`, so the controller still reads each Application's annotations. It polls GHCR every 5 minutes.
+2. Each tenant has its own CR at `platform/argocd-image-updater/manifests/<tenant>.yaml`: images, `semver` strategy, strict `X.Y.Z` `allowTags`, and git write-back into the tenant's `kustomization.yaml`. The Application itself carries no updater annotations. The controller polls GHCR every 5 minutes.
 3. When a tag that matches the allow-list is newer, it commits the bump into the tenant's `kustomization.yaml` `images:` block as `argocd-image-updater <argocd-image-updater@spaderlabs.com>`, with a `chore(<app>): bump image tag` message.
 4. The commit triggers the webhook; ArgoCD syncs.
 
@@ -944,7 +944,7 @@ Credentials, without duplicate secrets:
 
 The `argocd-image-updater` namespace and quota come from `platform/namespaces/manifests/argocd-image-updater.yaml`.
 
-Per-Application annotations are in Phase 13.5.
+Adding a tenant's CR is in Phase 13.5. Check them with `kubectl -n argocd get imageupdater` (READY, APPS, IMAGES, LAST CHECKED).
 
 **Verify:**
 
@@ -1232,20 +1232,31 @@ Stateful apps: add a PVC on the default `local-path` StorageClass. The data live
 
 ### 13.5 `app.yaml`
 
-Single source on `tenants/<name>/manifests`, `selfHeal: true`, `ServerSideApply=true`. Opt in to the image updater with annotations (transitional, until tenants move to native `ImageUpdater` CRs):
+Single source on `tenants/<name>/manifests`, `selfHeal: true`, `ServerSideApply=true`. Opt in to the image updater with an `ImageUpdater` CR at `platform/argocd-image-updater/manifests/<name>.yaml` (copy [`kotin-dev.yaml`](platform/argocd-image-updater/manifests/kotin-dev.yaml)):
 
 ```yaml
+apiVersion: argocd-image-updater.argoproj.io/v1alpha1
+kind: ImageUpdater
 metadata:
-  annotations:
-    argocd-image-updater.argoproj.io/image-list: <alias>=ghcr.io/everspader/<image>
-    argocd-image-updater.argoproj.io/<alias>.update-strategy: semver
-    argocd-image-updater.argoproj.io/<alias>.allow-tags: 'regexp:^\d+\.\d+\.\d+$'
-    argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/github-app-homelab
-    argocd-image-updater.argoproj.io/git-branch: main
-    argocd-image-updater.argoproj.io/write-back-target: kustomization
+  name: <name>
+  namespace: argocd          # must match the Applications' namespace
+spec:
+  commonUpdateSettings:
+    updateStrategy: semver
+    allowTags: 'regexp:^\d+\.\d+\.\d+$'
+  writeBackConfig:
+    method: git:secret:github-app-homelab
+    gitConfig:
+      branch: main
+      writeBackTarget: kustomization
+  applicationRefs:
+    - namePattern: <name>    # exact Application name; never let two CRs match one app
+      images:
+        - alias: <alias>
+          imageName: ghcr.io/everspader/<image>
 ```
 
-Then add a `- namePattern: <name>` / `useAnnotations: true` entry to [`imageupdater-legacy.yaml`](platform/argocd-image-updater/manifests/imageupdater-legacy.yaml). Do not add a `pull-secret` annotation: 1.x rejects a cross-namespace one, and GHCR auth is registry-wide.
+No pull secret and no RBAC change: GHCR auth is registry-wide, and 1.x rejects cross-namespace pull secrets anyway.
 
 ### 13.6 Networking
 
