@@ -19,5 +19,3 @@ spec:
       useAnnotations: true
     - namePattern: tally
       useAnnotations: true
-    - namePattern: tally-dev
-      useAnnotations: true

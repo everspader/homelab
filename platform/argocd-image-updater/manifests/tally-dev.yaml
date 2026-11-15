@@ -1,0 +1,33 @@
+# Image updater config for the tally-dev Application.
+#
+# Mirrors the prod `tally` CR (tally.yaml). Dev currently tracks the SAME
+# released tags as prod — a separate-data sandbox on identical images. A
+# pre-release tag stream (dev running unreleased code) is a planned follow-up.
+#
+# Two aliases because the api and worker are built and tagged independently in
+# the tally repo (api@x.y.z / worker@x.y.z), so they bump on different cadences.
+#
+# GHCR auth is registry-wide (values.yaml `config.registries`), so no pullSecret.
+# Must live in `argocd`: 1.x only selects Applications in the CR's namespace.
+apiVersion: argocd-image-updater.argoproj.io/v1alpha1
+kind: ImageUpdater
+metadata:
+  name: tally-dev
+  namespace: argocd
+spec:
+  commonUpdateSettings:
+    updateStrategy: semver
+    allowTags: 'regexp:^\d+\.\d+\.\d+$'
+  writeBackConfig:
+    # ArgoCD's GitHub App; must be in the CR's namespace. Needs Contents: write.
+    method: git:secret:github-app-homelab
+    gitConfig:
+      branch: main
+      writeBackTarget: kustomization
+  applicationRefs:
+    - namePattern: tally-dev
+      images:
+        - alias: tally
+          imageName: ghcr.io/everspader/tally-api
+        - alias: tally-worker
+          imageName: ghcr.io/everspader/tally-worker
