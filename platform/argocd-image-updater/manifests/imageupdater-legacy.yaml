@@ -17,5 +17,3 @@ spec:
   applicationRefs:
     - namePattern: rookia
       useAnnotations: true
-    - namePattern: tally
-      useAnnotations: true

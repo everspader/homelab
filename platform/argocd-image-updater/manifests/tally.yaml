@@ -1,0 +1,31 @@
+# Image updater config for the prod `tally` Application.
+#
+# Two aliases because the api and worker are built and tagged independently in
+# the tally repo (api@x.y.z / worker@x.y.z), so they bump on different cadences.
+# A newer strict-semver tag is committed into
+# tenants/tally/manifests/kustomization.yaml's `images:` block; ArgoCD rolls it out.
+#
+# GHCR auth is registry-wide (values.yaml `config.registries`), so no pullSecret.
+# Must live in `argocd`: 1.x only selects Applications in the CR's namespace.
+apiVersion: argocd-image-updater.argoproj.io/v1alpha1
+kind: ImageUpdater
+metadata:
+  name: tally
+  namespace: argocd
+spec:
+  commonUpdateSettings:
+    updateStrategy: semver
+    allowTags: 'regexp:^\d+\.\d+\.\d+$'
+  writeBackConfig:
+    # ArgoCD's GitHub App; must be in the CR's namespace. Needs Contents: write.
+    method: git:secret:github-app-homelab
+    gitConfig:
+      branch: main
+      writeBackTarget: kustomization
+  applicationRefs:
+    - namePattern: tally
+      images:
+        - alias: tally
+          imageName: ghcr.io/everspader/tally-api
+        - alias: tally-worker
+          imageName: ghcr.io/everspader/tally-worker
