@@ -1,42 +1,50 @@
-# Argo CD Image Updater — watches GHCR for new Rookia tags, commits the bumped
-# tag back to this repo's kustomization.yaml, and lets ArgoCD do the rollout.
+# Argo CD Image Updater (1.x) — watches GHCR for new tenant tags, commits the
+# bumped tag back to this repo's kustomization.yaml, and lets ArgoCD do the
+# rollout.
+#
+# 1.x is a Kubebuilder operator: it only acts on Applications matched by an
+# `ImageUpdater` CR (manifests/imageupdater-*.yaml). Those CRs live in the
+# `argocd` namespace next to the Applications they select.
 #
 # Auth model:
-#   - Registry: per-Application annotation `pull-secret: pullsecret:rookia/ghcr-pull`.
-#     Cross-namespace Secret read is granted by manifests/rbac.yaml.
-#   - Git push: per-Application annotation `write-back-method: git:secret:argocd/github-app-homelab`.
-#     Reuses ArgoCD's GitHub App. The App needs `Contents: write` permission on the repo.
+#   - Registry: one registry-wide GHCR credential (config.registries below),
+#     backed by manifests/sealed-ghcr-pull.yaml in this namespace. 1.x rejects
+#     per-image pull secrets from a namespace other than the Application's.
+#   - Git push: `git:secret:argocd/github-app-homelab` — ArgoCD's GitHub App,
+#     same namespace as the Applications. The App needs `Contents: write`.
 
 config:
-  # Watch ArgoCD Application CRDs directly via the Kubernetes API. Simpler than
-  # the gRPC mode — no ArgoCD API token to provision, no in-cluster TLS dance.
-  applicationsAPIKind: "kubernetes"
+  # Every key except name/registries/sshConfig lands verbatim in the
+  # argocd-image-updater-config ConfigMap, which the Deployment reads as env.
 
-  # Used only when an Application opts into `write-back-method: argocd` (we don't),
-  # but the chart still wants the field set.
-  argocd:
-    grpcWeb: true
-    serverAddress: "argocd-server.argocd.svc"
-    insecure: false
-    plaintext: false
+  # CRs and Applications both live in `argocd`; the controller runs in its own
+  # namespace and would otherwise watch only that one.
+  watch.namespaces: argocd
+  argocd.namespace: argocd
 
-  logLevel: info
+  # Default poll is 2m. 5m is plenty for a homelab and keeps GHCR API calls modest.
+  interval: 5m
 
-  # Commit author baked into every bump commit. Matches the convention in
-  # platform/argocd-image-updater/README assumptions: bot identity, no PII.
-  gitCommitUser: argocd-image-updater
-  gitCommitMail: argocd-image-updater@spaderlabs.com
-  gitCommitTemplate: |
+  log.level: info
+
+  # Commit author baked into every bump commit. Bot identity, no PII.
+  git.user: argocd-image-updater
+  git.email: argocd-image-updater@spaderlabs.com
+  git.commit-message-template: |
     chore({{ .AppName }}): bump image tag
 
     {{ range .AppChanges -}}
     - {{ .Image }}:{{ .OldTag }} -> {{ .NewTag }}
     {{ end }}
 
-# Default poll is 2m. 5m is plenty for a homelab and keeps GHCR API calls modest.
-extraArgs:
-  - --interval
-  - 5m
+  registries:
+    - name: GitHub Container Registry
+      api_url: https://ghcr.io
+      prefix: ghcr.io
+      ping: yes
+      credentials: pullsecret:argocd-image-updater/ghcr-pull
+      # Re-read the secret hourly so a rotated PAT is picked up without a restart.
+      credsexpire: 1h
 
 # Conservative — single-replica controller, minimal footprint. Bump if it
 # starts watching many Applications.

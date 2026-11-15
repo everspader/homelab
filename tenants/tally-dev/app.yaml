@@ -6,7 +6,7 @@ metadata:
   finalizers:
     - resources-finalizer.argocd.argoproj.io
   # Mirrors the prod `tally` Application's argocd-image-updater config (semver
-  # strategy, strict X.Y.Z allow-tags, cross-namespace pull secret, GitHub App
+  # strategy, strict X.Y.Z allow-tags, GitHub App
   # write-back into this tenant's kustomization.yaml). Dev currently tracks the
   # SAME released tags as prod — a separate-data sandbox on identical images.
   # A pre-release tag stream (dev running unreleased code) is a planned follow-up.
@@ -14,10 +14,8 @@ metadata:
     argocd-image-updater.argoproj.io/image-list: tally=ghcr.io/everspader/tally-api,tally-worker=ghcr.io/everspader/tally-worker
     argocd-image-updater.argoproj.io/tally.update-strategy: semver
     argocd-image-updater.argoproj.io/tally.allow-tags: 'regexp:^\d+\.\d+\.\d+$'
-    argocd-image-updater.argoproj.io/tally.pull-secret: pullsecret:tally-dev/ghcr-pull
     argocd-image-updater.argoproj.io/tally-worker.update-strategy: semver
     argocd-image-updater.argoproj.io/tally-worker.allow-tags: 'regexp:^\d+\.\d+\.\d+$'
-    argocd-image-updater.argoproj.io/tally-worker.pull-secret: pullsecret:tally-dev/ghcr-pull
     argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/github-app-homelab
     argocd-image-updater.argoproj.io/git-branch: main
     argocd-image-updater.argoproj.io/write-back-target: kustomization

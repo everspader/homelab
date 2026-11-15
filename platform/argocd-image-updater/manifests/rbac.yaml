@@ -1,123 +1,16 @@
-# Cross-namespace Secret reads for the argocd-image-updater ServiceAccount.
+# Cross-namespace Secret read for the argocd-image-updater ServiceAccount.
 #
-# The chart deploys the SA `argocd-image-updater` in its own namespace and
-# already grants it the controller-internal RBAC it needs (read Application
-# CRDs in argocd ns, read its own ConfigMap, etc.). What's missing for our
-# auth model is read access to the *existing* Secrets we don't want to
-# duplicate:
+# The chart grants the controller its own RBAC: a ClusterRole for Applications
+# and ImageUpdater CRs, plus Secret/ConfigMap reads in its own namespace (which
+# covers argocd-image-updater/ghcr-pull, the registry-wide GHCR credential).
 #
-#   1. rookia/ghcr-pull         — referenced via `pullsecret:rookia/ghcr-pull`
-#                                 in the rookia Application annotations, so
-#                                 the updater can list tags on private GHCR.
-#   2. tally/ghcr-pull          — same role for the tally tenant.
-#   2b. tally-dev/ghcr-pull      — same role for the tally-dev (dev env) tenant.
-#   2c. kotin-dev/ghcr-pull      — same role for the kotin-dev tenant.
-#   3. argocd/github-app-homelab — referenced via `git:secret:argocd/...`,
-#                                 reused as git-push creds so we don't seal
-#                                 a second copy of the GitHub App key.
+# What's missing is read access to argocd/github-app-homelab, referenced via
+# `git:secret:argocd/github-app-homelab` and reused as git-push creds so we
+# don't seal a second copy of the GitHub App key. 1.x only accepts a git
+# secret in the Application's namespace, which is `argocd`.
 #
-# resourceNames pins each Role to a single Secret — least-privilege, no
-# blanket Secret read on either namespace.
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: argocd-image-updater-ghcr-pull-reader
-  namespace: rookia
-rules:
-  - apiGroups: [""]
-    resources: ["secrets"]
-    resourceNames: ["ghcr-pull"]
-    verbs: ["get"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: argocd-image-updater-ghcr-pull-reader
-  namespace: rookia
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: argocd-image-updater-ghcr-pull-reader
-subjects:
-  - kind: ServiceAccount
-    name: argocd-image-updater
-    namespace: argocd-image-updater
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: argocd-image-updater-ghcr-pull-reader
-  namespace: tally
-rules:
-  - apiGroups: [""]
-    resources: ["secrets"]
-    resourceNames: ["ghcr-pull"]
-    verbs: ["get"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: argocd-image-updater-ghcr-pull-reader
-  namespace: tally
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: argocd-image-updater-ghcr-pull-reader
-subjects:
-  - kind: ServiceAccount
-    name: argocd-image-updater
-    namespace: argocd-image-updater
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: argocd-image-updater-ghcr-pull-reader
-  namespace: tally-dev
-rules:
-  - apiGroups: [""]
-    resources: ["secrets"]
-    resourceNames: ["ghcr-pull"]
-    verbs: ["get"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: argocd-image-updater-ghcr-pull-reader
-  namespace: tally-dev
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: argocd-image-updater-ghcr-pull-reader
-subjects:
-  - kind: ServiceAccount
-    name: argocd-image-updater
-    namespace: argocd-image-updater
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: argocd-image-updater-ghcr-pull-reader
-  namespace: kotin-dev
-rules:
-  - apiGroups: [""]
-    resources: ["secrets"]
-    resourceNames: ["ghcr-pull"]
-    verbs: ["get"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: argocd-image-updater-ghcr-pull-reader
-  namespace: kotin-dev
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: argocd-image-updater-ghcr-pull-reader
-subjects:
-  - kind: ServiceAccount
-    name: argocd-image-updater
-    namespace: argocd-image-updater
+# resourceNames pins the Role to that single Secret — least-privilege, no
+# blanket Secret read on the argocd namespace.
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role

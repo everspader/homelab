@@ -11,12 +11,12 @@ spec:
     # 1. Helm chart — values from $values (source #2).
     - chart: argocd-image-updater
       repoURL: https://argoproj.github.io/argo-helm
-      # 0.x line — annotation-based controller (reads annotations on Argo CD
-      # Application CRs). The 1.x rewrite is a Kubebuilder operator that
-      # watches a new `ImageUpdater` CRD instead, which would require
-      # rewriting every tenant's wiring. Stay on the established 0.x model
-      # until 1.x stabilises and there's a documented migration path.
-      targetRevision: 0.14.0
+      # 1.x line — Kubebuilder operator driven by `ImageUpdater` CRs (the chart
+      # installs the CRD). Tenants are still on their Application annotations
+      # via the bridge CR in manifests/imageupdater-legacy.yaml; they move to
+      # native CRs one at a time. 1.4+ is required: earlier CRDs stored
+      # defaults that broke setting inheritance.
+      targetRevision: 1.5.0
       helm:
         valueFiles:
           - $values/platform/argocd-image-updater/values.yaml
@@ -24,9 +24,9 @@ spec:
     - repoURL: https://github.com/everspader/homelab.git
       targetRevision: HEAD
       ref: values
-    # 3. Raw manifests under manifests/ — cross-namespace RBAC so the updater
-    #    SA can read rookia/ghcr-pull (registry auth) + argocd/github-app-homelab
-    #    (git push creds) without re-sealing duplicates.
+    # 3. Raw manifests under manifests/ — the GHCR pull SealedSecret, RBAC to
+    #    read argocd/github-app-homelab (git push creds), and the ImageUpdater
+    #    CRs (namespace `argocd`).
     - repoURL: https://github.com/everspader/homelab.git
       targetRevision: HEAD
       path: platform/argocd-image-updater/manifests
@@ -40,3 +40,5 @@ spec:
     syncOptions:
       - ServerSideApply=true
       - CreateNamespace=false  # namespace is owned by platform/namespaces
+      # The ImageUpdater CRs ship in the same sync as the chart's CRD.
+      - SkipDryRunOnMissingResource=true

@@ -931,16 +931,16 @@ Push. ArgoCD syncs, Grafana redeploys, they sign in with GitHub and get read-onl
 
 How it works:
 
-1. [`platform/argocd-image-updater/`](platform/argocd-image-updater/) installs chart `argocd-image-updater` **0.14.0** (the annotation-based 0.x line; 1.x replaces annotations with an `ImageUpdater` CRD and would need every tenant rewired).
-2. It reads annotations on ArgoCD `Application` CRs directly through the Kubernetes API (`applicationsAPIKind: kubernetes`) and polls GHCR every 5 minutes.
+1. [`platform/argocd-image-updater/`](platform/argocd-image-updater/) installs chart `argocd-image-updater` **1.5.0**. The 1.x controller only acts on Applications selected by an `ImageUpdater` CR in the `argocd` namespace (`watch.namespaces: argocd`).
+2. Tenants are mid-migration: the bridge CR [`manifests/imageupdater-legacy.yaml`](platform/argocd-image-updater/manifests/imageupdater-legacy.yaml) sets `useAnnotations: true`, so the controller still reads each Application's annotations. It polls GHCR every 5 minutes.
 3. When a tag that matches the allow-list is newer, it commits the bump into the tenant's `kustomization.yaml` `images:` block as `argocd-image-updater <argocd-image-updater@spaderlabs.com>`, with a `chore(<app>): bump image tag` message.
 4. The commit triggers the webhook; ArgoCD syncs.
 
 Credentials, without duplicate secrets:
 
 - **Git push:** reuses ArgoCD's GitHub App Secret (`argocd/github-app-homelab`, Phase 6.6), which is why the App needs **Contents: Read and write**.
-- **Registry:** reads each tenant's own `ghcr-pull` Secret.
-- [`manifests/rbac.yaml`](platform/argocd-image-updater/manifests/rbac.yaml) grants the updater ServiceAccount `get` on exactly those Secrets (one Role + RoleBinding per namespace, pinned with `resourceNames`). **Each new tenant that uses the updater needs its own Role + RoleBinding pair here.**
+- **Registry:** one registry-wide GHCR credential in `values.yaml` (`config.registries`), backed by [`manifests/sealed-ghcr-pull.yaml`](platform/argocd-image-updater/manifests/sealed-ghcr-pull.yaml) in the updater's own namespace. 1.x rejects per-image pull secrets from a namespace other than the Application's (`argocd`), so tenants set no `pull-secret`.
+- [`manifests/rbac.yaml`](platform/argocd-image-updater/manifests/rbac.yaml) grants the updater ServiceAccount `get` on `argocd/github-app-homelab` only, pinned with `resourceNames`. New tenants need no RBAC change.
 
 The `argocd-image-updater` namespace and quota come from `platform/namespaces/manifests/argocd-image-updater.yaml`.
 
@@ -1232,7 +1232,7 @@ Stateful apps: add a PVC on the default `local-path` StorageClass. The data live
 
 ### 13.5 `app.yaml`
 
-Single source on `tenants/<name>/manifests`, `selfHeal: true`, `ServerSideApply=true`. Opt in to the image updater with annotations:
+Single source on `tenants/<name>/manifests`, `selfHeal: true`, `ServerSideApply=true`. Opt in to the image updater with annotations (transitional, until tenants move to native `ImageUpdater` CRs):
 
 ```yaml
 metadata:
@@ -1240,13 +1240,12 @@ metadata:
     argocd-image-updater.argoproj.io/image-list: <alias>=ghcr.io/everspader/<image>
     argocd-image-updater.argoproj.io/<alias>.update-strategy: semver
     argocd-image-updater.argoproj.io/<alias>.allow-tags: 'regexp:^\d+\.\d+\.\d+$'
-    argocd-image-updater.argoproj.io/<alias>.pull-secret: pullsecret:<name>/ghcr-pull
     argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/github-app-homelab
     argocd-image-updater.argoproj.io/git-branch: main
     argocd-image-updater.argoproj.io/write-back-target: kustomization
 ```
 
-Then add a Role + RoleBinding for `<name>/ghcr-pull` in [`platform/argocd-image-updater/manifests/rbac.yaml`](platform/argocd-image-updater/manifests/rbac.yaml).
+Then add a `- namePattern: <name>` / `useAnnotations: true` entry to [`imageupdater-legacy.yaml`](platform/argocd-image-updater/manifests/imageupdater-legacy.yaml). Do not add a `pull-secret` annotation: 1.x rejects a cross-namespace one, and GHCR auth is registry-wide.
 
 ### 13.6 Networking
 

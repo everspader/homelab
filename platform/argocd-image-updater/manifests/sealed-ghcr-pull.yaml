@@ -1,0 +1,19 @@
+# GHCR read credential for the image updater's registry-wide entry in
+# values.yaml (config.registries). Copied from rookia/ghcr-pull (same PAT,
+# verified to list tags on rookia-api, tally-api, tally-worker, kotin-api).
+# 1.x refuses per-image pull secrets from another namespace, so the
+# controller needs its own copy. Re-seal from the PAT if it rotates.
+---
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  name: ghcr-pull
+  namespace: argocd-image-updater
+spec:
+  encryptedData:
+    .dockerconfigjson: AgC4zf4N+r40VdEclN+9d5b3iadZUCfwvjqyw6Eo3uKvOtIpIHc8KclFoe4U2fJsgSd7qCBCs5Vywp8jDyyH7+6kpoCLdVfmIYyKA24QaVu28QA/P5xdhEVESO0/qQBZZjwxYkWKhLBbREeJQW2NWc3CxPg4sLaZ8LlFY4sKrvCOoxTPp1X6jTke+8FpPeuNmEJcLJpCTYXKF6JIZDLt/3ol8gxHD+9chXlbmAlWdyGGBTO3qfm+Vyba+gmhE7Ry51sQc5M1jT/3HgviuUiPGvQLw2E0/TWrbKEsEdaXP6F6dmfho7kGvIDgBcAjKGW3PeFKyJYzoMq2pNxTg7lWzB9q8ZC6FD1W8duGgoUU8G5SYdErnPkFirgLHMJK00heQez6KgT36d29+4/uZLr2njaSX9BnOQ33rVhDr8xUl2FnFlfHzLVnuonFCVUPtpa2B+hudugr7SO4V+i3QJ7VVSP1Wu/xSpTcojbZpLgPxyCT5gfIpsqu8UsZqWiXCVAr/KCknMeo748nMuSH2NI/ezceTjYoEznGJe4blLErJWIkH1uxA6dwxjs9i8rsbZuP2gbCk3g6r8lzX7l7tXycOGWzvEGAbSMv+dLnRIANXFQkPJNXh3W0apWCVv12vuy1xRhIBdx9aBhaTLKYKFxeuQiXk3NmJOkF5iM5kg+FjvwEZphT30n2ed6ZpMWklRFYfVZi4zBxs1QchQ4U8vMCmYnUHqPZBqhMQiq2IbCv5JBuGJdVjdwW6ZWp6/W84mJWDxIJ9XHT0oiKlnLQdAwqyjvJu+DHD/990Xc0hjCDTVtqCeGYCKZ1q6RIrVtd0j8TRlcwUnDin5R2XfobWaci2Dg7Th5J+cZjofGhcqrWMR7l0qMLm0CooDBAl0WYdjB/y4WEP/5906jwgZJiB7kL1z708kbw4aCdBNGoL+aEM7aeMuL9dE2G7lY5b6Q5eP6rN3TqykrYd3RF8DZnwqVEiPsiJN1RBnQI
+  template:
+    metadata:
+      name: ghcr-pull
+      namespace: argocd-image-updater
+    type: kubernetes.io/dockerconfigjson

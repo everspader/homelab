@@ -14,8 +14,8 @@ metadata:
   #                               every other annotation key below.
   #   update-strategy: semver   : pick highest semver tag matching allow-tags.
   #   allow-tags                : strict X.Y.Z (no -rc / -beta / -dev).
-  #   pull-secret               : cross-namespace read of rookia/ghcr-pull,
-  #                               granted by platform/argocd-image-updater RBAC.
+  #   (no pull-secret)          : GHCR auth is registry-wide, set in
+  #                               platform/argocd-image-updater/values.yaml.
   #   write-back-method: git    : commit to git (not just patch in-cluster).
   #   git:secret:argocd/...     : GitHub App creds reused from ArgoCD's repo
   #                               creds; the App needs `Contents: write`.
@@ -25,7 +25,6 @@ metadata:
     argocd-image-updater.argoproj.io/image-list: rookia=ghcr.io/everspader/rookia-api
     argocd-image-updater.argoproj.io/rookia.update-strategy: semver
     argocd-image-updater.argoproj.io/rookia.allow-tags: 'regexp:^\d+\.\d+\.\d+$'
-    argocd-image-updater.argoproj.io/rookia.pull-secret: pullsecret:rookia/ghcr-pull
     argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/github-app-homelab
     argocd-image-updater.argoproj.io/git-branch: main
     argocd-image-updater.argoproj.io/write-back-target: kustomization

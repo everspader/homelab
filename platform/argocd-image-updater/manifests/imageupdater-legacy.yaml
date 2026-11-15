@@ -1,0 +1,25 @@
+# Bridge CR for the 0.x -> 1.x migration. `useAnnotations: true` makes the 1.x
+# controller read the existing argocd-image-updater.argoproj.io/* annotations
+# on each Application, so behaviour is unchanged after the chart upgrade.
+#
+# Phase 2 moves one tenant at a time to its own native CR. In the same commit,
+# remove that tenant's ref here and its annotations from tenants/<t>/app.yaml:
+# two CRs matching one Application make it thrash. Delete this file once the
+# list is empty.
+#
+# Must live in `argocd`: 1.x only selects Applications in the CR's namespace.
+apiVersion: argocd-image-updater.argoproj.io/v1alpha1
+kind: ImageUpdater
+metadata:
+  name: legacy-annotations
+  namespace: argocd
+spec:
+  applicationRefs:
+    - namePattern: rookia
+      useAnnotations: true
+    - namePattern: tally
+      useAnnotations: true
+    - namePattern: tally-dev
+      useAnnotations: true
+    - namePattern: kotin-dev
+      useAnnotations: true
