@@ -259,7 +259,8 @@ grafana:
         # FILL IN host/database/user before pushing — placeholders below.
         - name: Rookia (Neon prod)
           type: postgres
-          url: ep-falling-breeze-agyt76z7-pooler.c-2.eu-central-1.aws.neon.tech:5432
+          # Neon project rookia-sa (São Paulo), production branch.
+          url: ep-shiny-morning-b6mckeqk-pooler.c-2.sa-east-1.aws.neon.tech:5432
           user: grafana_ro
           isDefault: false
           editable: false
@@ -273,7 +274,7 @@ grafana:
             # database configured" errors.
             database: neondb
             sslmode: require
-            postgresVersion: 1500 # Neon currently runs PG 15.x; bump to 1600 if upgraded
+            postgresVersion: 1500 # server runs PG 17; 1500 is Grafana's highest option
             timescaledb: false
             maxOpenConns: 5
             maxIdleConns: 2
