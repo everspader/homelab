@@ -826,12 +826,12 @@ On the box:
 
 ```bash
 curl -fsSL https://tailscale.com/install.sh | sh     # adds the tailscale apt repo
-sudo tailscale up --ssh
+sudo tailscale up
 tailscale ip -4                                       # → 100.107.122.69
 ```
 
-- Approve the device in the Tailscale admin console, and **disable key expiry** for `homelab` so it never drops off the tailnet.
-- `--ssh` enables Tailscale SSH: connections to port 22 on the Tailscale IP are authenticated by tailnet identity and ACLs instead of `authorized_keys`. SSH on the LAN IP still goes to OpenSSH, which stays the fallback if Tailscale is down. ufw allows everything on `tailscale0` (Phase 2.3).
+- Approve the device in the Tailscale admin console, and **disable key expiry** for `homelab` (and the Mac) so neither drops off the tailnet.
+- Do **not** pass `--ssh`. Tailscale SSH hijacks port 22 on the Tailscale IP, and the default ACL rule uses `"action": "check"`, which forces a browser re-auth roughly every 12h. Plain OpenSSH with the GitHub-imported keys works the same over LAN and Tailscale. If it was enabled, turn it off with `sudo tailscale set --ssh=false`. ufw allows everything on `tailscale0` (Phase 2.3).
 - The Tailscale IP is already in the k3s `tls-san` list (Phase 3.2) and in the Mac's kubeconfig (Phase 3.4).
 
 On the Mac (and phone), install Tailscale and sign in to the same tailnet.
