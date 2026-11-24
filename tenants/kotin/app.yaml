@@ -1,0 +1,27 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kotin
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  # Image tag bumps come from the ImageUpdater CR in
+  # platform/argocd-image-updater/manifests/kotin.yaml (semver X.Y.Z,
+  # git write-back into manifests/kustomization.yaml's `images:` block).
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/everspader/homelab.git
+    targetRevision: HEAD
+    path: tenants/kotin/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kotin
+  syncPolicy:
+    automated:
+      selfHeal: true
+      # prune disabled: this tenant carries SealedSecrets; a renamed sealed
+      # file with prune on could delete the live Secret. Same caution as rookia.
+      prune: false
+    syncOptions:
+      - ServerSideApply=true

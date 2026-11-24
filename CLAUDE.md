@@ -23,7 +23,7 @@ platform/           Cluster-wide infra. One subdir == one ArgoCD Application.
   argocd-image-updater/  Bumps tenant image tags in kustomization.yaml via git write-back
 tenants/            One subdir per logical app. Each has app.yaml + manifests/ (kustomization.yaml)
   rookia/           api Deployment (images on GHCR). External Supabase Postgres; async jobs via QStash — no in-cluster worker.
-  tally/, tally-dev/, kotin-dev/   api (+ worker) on the host Postgres
+  tally/, tally-dev/, kotin/, kotin-dev/   api (+ worker) on the host Postgres
 host/               Host-level config NOT managed by ArgoCD — symlinked into the box's filesystem and reloaded manually. See host/README.md.
   k3s/config.yaml   → /etc/rancher/k3s/config.yaml on the homelab box
   postgres/         → host Postgres 17 (serves tally + kotin tenants) + pgBackRest backups to R2
