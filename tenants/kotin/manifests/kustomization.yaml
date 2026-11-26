@@ -13,4 +13,4 @@ resources:
   - api/job.yaml
 images:
   - name: ghcr.io/everspader/kotin-api
-    newTag: 0.21.0
+    newTag: 0.22.1
