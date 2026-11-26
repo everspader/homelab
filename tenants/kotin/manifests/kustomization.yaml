@@ -1,8 +1,9 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 # Kustomize source for the kotin ArgoCD Application. The `images:` block is
-# the single source of truth for the image tag and is what
-# argocd-image-updater rewrites on a matching GHCR tag (see ../app.yaml).
+# the single source of truth for the image tag. It is pinned: only a commit
+# changes it, made by `bun run promote` / `promote:api` in the kotin repo
+# (see ../app.yaml).
 namespace: kotin
 resources:
   - sealed-env.yaml

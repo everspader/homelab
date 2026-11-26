@@ -5,9 +5,10 @@ metadata:
   namespace: argocd
   finalizers:
     - resources-finalizer.argocd.argoproj.io
-  # Image tag bumps come from the ImageUpdater CR in
-  # platform/argocd-image-updater/manifests/kotin.yaml (semver X.Y.Z,
-  # git write-back into manifests/kustomization.yaml's `images:` block).
+  # No ImageUpdater: production runs only promoted versions. The image tag in
+  # manifests/kustomization.yaml changes only by a commit, made by
+  # `bun run promote` / `bun run promote:api` in the kotin repo
+  # (docs/releasing.md, "Production release cycle"). kotin-dev follows every tag.
 spec:
   project: default
   source:

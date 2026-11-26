@@ -27,7 +27,7 @@ spec:
         - name: ghcr-pull # SealedSecret in the same namespace
       containers:
         - name: api
-          image: ghcr.io/everspader/kotin-api:0.5.0 # tag overridden by ../kustomization.yaml `images:` (managed by argocd-image-updater)
+          image: ghcr.io/everspader/kotin-api:0.5.0 # tag overridden by ../kustomization.yaml `images:` (pinned by promote in the kotin repo)
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
