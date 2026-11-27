@@ -24,6 +24,7 @@ platform/           Cluster-wide infra. One subdir == one ArgoCD Application.
 tenants/            One subdir per logical app. Each has app.yaml + manifests/ (kustomization.yaml)
   rookia/           api Deployment (images on GHCR). External Supabase Postgres; async jobs via QStash — no in-cluster worker.
   tally/, tally-dev/, kotin/, kotin-dev/   api (+ worker) on the host Postgres
+  agents/           AppProject `agents` + ApplicationSet: one subfolder per Claude Agent SDK agent (see Agents section)
 host/               Host-level config NOT managed by ArgoCD — symlinked into the box's filesystem and reloaded manually. See host/README.md.
   k3s/config.yaml   → /etc/rancher/k3s/config.yaml on the homelab box
   postgres/         → host Postgres 17 (serves tally + kotin tenants) + pgBackRest backups to R2
@@ -58,6 +59,17 @@ Each platform component is **self-managing** via Helm: the `app.yaml` points at 
 ## Images
 
 Tenant images are built by each app repo's GitHub Actions and pushed to GHCR (`ghcr.io/everspader/<image>:X.Y.Z`); ArgoCD Image Updater bumps the tag in the tenant's `kustomization.yaml` (SETUP.md Phases 10 and 13). `tenants/rookia` pulls `ghcr.io/everspader/rookia-api`. Only `linux/amd64` — the homelab is x86_64, no multi-arch needed. There is no separate worker — async work arrives as signed QStash (Upstash) HTTP webhooks to the api. The `rookia-api-migrate` Job runs the same image with `bun run db:migrate` ahead of rollout via Argo sync waves.
+
+## Agents (Claude Agent SDK) — `tenants/agents/`
+
+Runner image and Helm chart live in `everspader/agents` (`ghcr.io/everspader/agent-runner:X.Y.Z`, chart at `charts/agent`, pinned by git tag in `tenants/agents/app.yaml`). Design: https://claude.ai/artifact/XPq4yZB3y4y1akxqsUP8XU.
+
+- One folder per agent: `tenants/agents/<name>/values.yaml` + `manifests/` (SealedSecrets). The ApplicationSet creates Application `agent-<name>` in namespace `agent-<name>`, labelled `agent=true`.
+- **Exception to the tenancy rules:** agent namespaces and quotas are not in `platform/namespaces/`. The ApplicationSet creates the namespace and the chart creates its ResourceQuota, so adding an agent stays one folder.
+- AppProject `agents` limits sources to the two repos, destinations to `agent-*`, and kinds to what the chart renders plus SealedSecrets. Agents get no ServiceAccount token and no RBAC, unlike Adolf.
+- Each agent namespace needs two SealedSecrets: `<name>-env` (`ANTHROPIC_API_KEY`, one key per agent) and `ghcr-pull` (the image is private). Seal them for namespace `agent-<name>`.
+- Removing a folder removes the Application but keeps the namespace, memory volume and secrets (`preserveResourcesOnDeletion`).
+- Run an agent now: `kubectl -n agent-<name> create job --from=cronjob/<name> <name>-now`.
 
 ## Hermes (Adolf) — host-level agent
 

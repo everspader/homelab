@@ -1,0 +1,98 @@
+# Claude Agent SDK agents (everspader/agents). One subfolder here = one agent:
+#   tenants/agents/<name>/values.yaml            chart values (schedule, model, prompt, ...)
+#   tenants/agents/<name>/manifests/*.yaml        SealedSecrets for namespace agent-<name>
+# The ApplicationSet below turns each folder into an Application `agent-<name>` that deploys
+# the agent chart into its own namespace `agent-<name>`. Adding an agent = adding a folder.
+#
+# Convention exception: agent namespaces and their ResourceQuotas are NOT in
+# platform/namespaces/. The ApplicationSet creates the namespace (CreateNamespace) and the
+# chart creates its ResourceQuota, so an agent stays one folder.
+---
+# Limits what any agent Application can do, whatever its chart or values say: sources are the
+# agents and homelab repos only, destinations are agent-* namespaces only, and the only
+# resource kinds are the ones the chart renders plus SealedSecrets (no RBAC, no workloads
+# beyond CronJobs, nothing cluster-wide except its own Namespace).
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: agents
+  namespace: argocd
+spec:
+  description: Claude Agent SDK agents, one namespace each
+  sourceRepos:
+    - https://github.com/everspader/agents.git
+    - https://github.com/everspader/homelab.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: agent-*
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+  namespaceResourceWhitelist:
+    - group: ""
+      kind: ConfigMap
+    - group: ""
+      kind: PersistentVolumeClaim
+    - group: ""
+      kind: ServiceAccount
+    - group: ""
+      kind: ResourceQuota
+    - group: batch
+      kind: CronJob
+    - group: bitnami.com
+      kind: SealedSecret
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: agents
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - git:
+        repoURL: https://github.com/everspader/homelab.git
+        revision: HEAD
+        directories:
+          - path: tenants/agents/*
+  # Removing an agent folder deletes its Application but leaves the namespace, its memory
+  # volume and its secrets in place. Clean those up by hand when an agent is retired for good.
+  syncPolicy:
+    preserveResourcesOnDeletion: true
+  template:
+    metadata:
+      name: "agent-{{ .path.basename }}"
+    spec:
+      project: agents
+      sources:
+        # 1. The agent chart, pinned to a release of everspader/agents. Bump to roll out.
+        - repoURL: https://github.com/everspader/agents.git
+          targetRevision: v0.2.0
+          path: charts/agent
+          helm:
+            releaseName: "{{ .path.basename }}"
+            valueFiles:
+              - "$values/{{ .path.path }}/values.yaml"
+        # 2. This repo as $values for the chart.
+        - repoURL: https://github.com/everspader/homelab.git
+          targetRevision: HEAD
+          ref: values
+        # 3. The agent's SealedSecrets.
+        - repoURL: https://github.com/everspader/homelab.git
+          targetRevision: HEAD
+          path: "{{ .path.path }}/manifests"
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "agent-{{ .path.basename }}"
+      syncPolicy:
+        automated:
+          selfHeal: true
+          # prune disabled: these apps carry SealedSecrets, same caution as the other tenants.
+          prune: false
+        managedNamespaceMetadata:
+          labels:
+            agent: "true"
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true
