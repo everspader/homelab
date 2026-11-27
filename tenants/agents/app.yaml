@@ -11,7 +11,7 @@
 # Limits what any agent Application can do, whatever its chart or values say: sources are the
 # agents and homelab repos only, destinations are agent-* namespaces only, and the only
 # resource kinds are the ones the chart renders plus SealedSecrets (no RBAC, no workloads
-# beyond CronJobs, nothing cluster-wide except its own Namespace).
+# beyond one CronJob or Deployment, nothing cluster-wide except its own Namespace).
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
 metadata:
@@ -39,6 +39,8 @@ spec:
       kind: ResourceQuota
     - group: batch
       kind: CronJob
+    - group: apps
+      kind: Deployment
     - group: bitnami.com
       kind: SealedSecret
 ---
@@ -68,7 +70,7 @@ spec:
       sources:
         # 1. The agent chart, pinned to a release of everspader/agents. Bump to roll out.
         - repoURL: https://github.com/everspader/agents.git
-          targetRevision: v0.3.0
+          targetRevision: v0.4.0
           path: charts/agent
           helm:
             releaseName: "{{ .path.basename }}"
