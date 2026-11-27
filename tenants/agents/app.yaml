@@ -68,7 +68,7 @@ spec:
       sources:
         # 1. The agent chart, pinned to a release of everspader/agents. Bump to roll out.
         - repoURL: https://github.com/everspader/agents.git
-          targetRevision: v0.2.0
+          targetRevision: v0.3.0
           path: charts/agent
           helm:
             releaseName: "{{ .path.basename }}"

@@ -70,6 +70,7 @@ Runner image and Helm chart live in `everspader/agents` (`ghcr.io/everspader/age
 - Each agent namespace needs two SealedSecrets: `<name>-env` (`ANTHROPIC_API_KEY`, one key per agent) and `ghcr-pull` (the image is private). Seal them for namespace `agent-<name>`.
 - Removing a folder removes the Application but keeps the namespace, memory volume and secrets (`preserveResourcesOnDeletion`).
 - Run an agent now: `kubectl -n agent-<name> create job --from=cronjob/<name> <name>-now`.
+- `pm` (SpaderLabs PM) shapes the Linear issues delegated to it, hourly 08:00-22:00. Its `values.yaml` is generated from `examples/pm.md` in the agents repo; its secret holds `ANTHROPIC_API_KEY`, `LINEAR_CLIENT_ID` and `LINEAR_CLIENT_SECRET` (a Linear OAuth app with client credentials).
 
 ## Hermes (Adolf) — host-level agent
 
