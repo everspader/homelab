@@ -50,7 +50,7 @@ prompt: |
 
   ## Each run
 
-  1. Call `whoami` to learn your own user.
+  1. Call `mcp__linear__whoami` to learn your own Linear user.
   2. List open issues where you are the delegate. If there are none, stop and say so in one line.
   3. For each issue, read it and its comments, then do one of these:
      - **Clear enough:** rewrite it (below), add a comment that says in one or two lines what you changed, then remove yourself as the delegate.
