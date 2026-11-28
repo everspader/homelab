@@ -31,6 +31,7 @@ config:
     - mcp__linear__list_project_labels
     - mcp__linear__list_users
     - mcp__linear__list_teams
+    - mcp__linear__get_team
     - mcp__linear__list_milestones
     - mcp__linear__get_milestone
     - mcp__linear__save_milestone
