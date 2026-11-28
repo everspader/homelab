@@ -62,7 +62,7 @@ Tenant images are built by each app repo's GitHub Actions and pushed to GHCR (`g
 
 ## Agents (Claude Agent SDK) — `tenants/agents/`
 
-Runner image and Helm chart live in `everspader/agents` (`ghcr.io/everspader/agent-runner:X.Y.Z`, chart at `charts/agent`, pinned by git tag in `tenants/agents/app.yaml`). Design: https://claude.ai/artifact/XPq4yZB3y4y1akxqsUP8XU.
+Runner image and Helm chart live in `everspader/agents` (`ghcr.io/everspader/agent-runner:X.Y.Z`, chart at `charts/agent`, pinned by git tag in `tenants/agents/app.yaml`). Chart and image share one version: bumping that tag upgrades every agent's image too. Agent `values.yaml` files leave `image.tag` unset unless one pins another release. Design: https://claude.ai/artifact/XPq4yZB3y4y1akxqsUP8XU.
 
 - One folder per agent: `tenants/agents/<name>/values.yaml` + `manifests/` (SealedSecrets). The ApplicationSet creates Application `agent-<name>` in namespace `agent-<name>`, labelled `agent=true`.
 - **Exception to the tenancy rules:** agent namespaces and quotas are not in `platform/namespaces/`. The ApplicationSet creates the namespace and the chart creates its ResourceQuota, so adding an agent stays one folder.
@@ -79,6 +79,7 @@ Runner image and Helm chart live in `everspader/agents` (`ghcr.io/everspader/age
 - `systemd/hermes.service` → `/etc/systemd/system/hermes.service` — system-scope unit, sandboxed (`ProtectSystem=strict`, dropped caps, etc.). The gateway runs as the dedicated `hermes` system user (uid 995, no sudo), **not** `home`.
 - `bin/hermes-cli` → `/usr/local/bin/hermes` — wrapper so `home` can run Adolf's CLI as the `hermes` user; it `cd /opt/homelab`s first (hermes can't read `/home/home`) and skips the OSC 11 query via `HERMES_TUI_THEME`.
 - `sudoers.d/50-hermes-cli` → `/etc/sudoers.d/50-hermes-cli` — **installed, not symlinked** (sudo rejects symlinked rules). See host/README.md.
+- `systemd/hermes-update.{service,path}` → `/etc/systemd/system/` — self-update. Telegram `/selfupdate` touches `.selfupdate-request`, and the path unit runs the update outside the gateway's cgroup, then restarts `hermes`. The built-in `/update` gets killed by its own restart. See host/README.md.
 
 Runtime state (`.env`, `config.yaml`, sessions, skills, sqlite dbs) lives in `/var/lib/hermes/.hermes/` — outside the repo, owned `hermes:hermes` 0750. Apply path for the unit: edit in repo → `git pull` on box → `sudo systemctl daemon-reload && sudo systemctl restart hermes`. Live config reload (after editing `config.yaml` on the box): `sudo systemctl reload hermes` (SIGUSR1).
 

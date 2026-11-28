@@ -2,8 +2,6 @@
 # Generated from everspader/agents examples/pm.md. Namespace: agent-pm. Secrets: manifests/.
 # Chart reference: https://github.com/everspader/agents/blob/main/charts/agent/values.yaml
 
-image:
-  tag: 0.4.0
 imagePullSecrets:
   - name: ghcr-pull
 mode: service
